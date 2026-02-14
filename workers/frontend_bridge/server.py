@@ -249,6 +249,21 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
 
 # ── Real inference (delegated to DraftNodeClient + Modal target) ──
 
+def _get_modal_draft_service():
+    """Get Modal draft service client."""
+    if not hasattr(_get_modal_draft_service, "_client"):
+        try:
+            import modal
+            _get_modal_draft_service._client = modal.Cls.from_name(
+                "treehacks-draft-service",
+                "DraftService"
+            )()
+            print("Connected to Modal draft service")
+        except Exception as e:
+            print(f"Failed to connect to Modal draft service: {e}")
+            raise
+    return _get_modal_draft_service._client
+
 def _get_draft_client():
     if not hasattr(_get_draft_client, "_client"):
         from workers.draft_node.client import DraftNodeClient
@@ -263,71 +278,56 @@ def _get_draft_client():
 
 def run_real_inference(prompt: str, params: InferenceRequest):
     """
-    Run speculative decoding through DraftNodeClient.
+    Run speculative decoding through Modal DraftService.
     Yields (event_type, data, tokens) tuples.
     """
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "proto"))
-    import common_pb2
-    import speculative_decoding_pb2
-
     request_id = str(uuid.uuid4())[:8]
     model_prompt = _build_model_prompt(prompt)
 
-    request = speculative_decoding_pb2.InferenceJobRequest(
+    # Get Modal draft service
+    draft_service = _get_modal_draft_service()
+
+    # Call Modal service
+    result = draft_service.execute_inference.remote(
         request_id=request_id,
         prompt=model_prompt,
-        params=common_pb2.InferenceParams(
-            max_tokens=params.max_tokens,
-            temperature=params.temperature,
-            top_k=params.top_k,
-            draft_tokens=params.draft_tokens,
-        ),
-        model_id=DRAFT_MODEL,
-        timestamp=int(time.time() * 1000),
+        max_tokens=params.max_tokens,
+        temperature=params.temperature,
+        top_k=params.top_k,
+        draft_tokens=params.draft_tokens,
     )
 
-    client = _get_draft_client()
-    final_response = None
-
-    for event_type, data, tokens in client.execute_inference_stream(request):
-        if event_type == "round":
-            round_event = RoundEvent(**data)
-            token_events = [
-                TokenEvent(
-                    text=t["text"],
-                    type=t["type"],
-                    token_id=t.get("token_id", 0),
-                    logprob=t.get("logprob", 0.0),
-                )
-                for t in tokens
-            ]
-            yield ("round", round_event, token_events)
-        elif event_type == "done":
-            final_response = data
-
-    if final_response is None:
-        raise RuntimeError("DraftNodeClient did not produce a final inference response")
-
-    final_token_events = [
+    # Convert result to our format
+    token_events = [
         TokenEvent(
-            text=t.text,
-            type="accepted",
-            token_id=t.token_id,
-            logprob=t.logprob,
+            text=t["text"],
+            type=t.get("type", "accepted"),
+            token_id=t.get("token_id", 0),
+            logprob=t.get("logprob", 0.0),
         )
-        for t in final_response.tokens
+        for t in result["tokens"]
     ]
 
+    round_event = RoundEvent(
+        round_num=result["speculation_rounds"],
+        drafted=result["draft_tokens_generated"],
+        accepted=result["draft_tokens_accepted"],
+        corrected=max(0, result["total_tokens"] - result["draft_tokens_accepted"]),
+        verification_time_ms=0.0,
+        acceptance_rate=result["acceptance_rate"],
+    )
+    yield ("round", round_event, token_events)
+
     summary = InferenceResponse(
-        request_id=final_response.request_id,
-        generated_text=final_response.generated_text,
-        tokens=final_token_events,
-        total_tokens=final_response.total_tokens,
-        draft_tokens_generated=final_response.draft_tokens_generated,
-        draft_tokens_accepted=final_response.draft_tokens_accepted,
-        generation_time_ms=final_response.generation_time_ms,
-        acceptance_rate=final_response.acceptance_rate,
-        speculation_rounds=final_response.speculation_rounds,
+        request_id=result["request_id"],
+        generated_text=result["generated_text"],
+        tokens=token_events,
+        total_tokens=result["total_tokens"],
+        draft_tokens_generated=result["draft_tokens_generated"],
+        draft_tokens_accepted=result["draft_tokens_accepted"],
+        generation_time_ms=result["generation_time_ms"],
+        acceptance_rate=result["acceptance_rate"],
+        speculation_rounds=result["speculation_rounds"],
     )
     yield ("done", summary, [])
 
