@@ -1,0 +1,166 @@
+{
+  "prompt": "Explain how neural networks learn from data.",
+  "rounds": [
+    {
+      "round_num": 1,
+      "drafted": 5,
+      "accepted": 4,
+      "corrected": 1,
+      "verification_time_ms": 12.3,
+      "acceptance_rate": 0.8,
+      "tokens": [
+        { "text": "Neural", "type": "accepted" },
+        { "text": " networks", "type": "accepted" },
+        { "text": " learn", "type": "accepted" },
+        { "text": " by", "type": "accepted" },
+        { "text": " slowly", "type": "rejected" },
+        { "text": " adjusting", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 2,
+      "drafted": 5,
+      "accepted": 3,
+      "corrected": 1,
+      "verification_time_ms": 14.1,
+      "acceptance_rate": 0.6,
+      "tokens": [
+        { "text": " the", "type": "accepted" },
+        { "text": " strength", "type": "accepted" },
+        { "text": " of", "type": "accepted" },
+        { "text": " their", "type": "rejected" },
+        { "text": " connections", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 3,
+      "drafted": 5,
+      "accepted": 5,
+      "corrected": 0,
+      "verification_time_ms": 11.8,
+      "acceptance_rate": 1.0,
+      "tokens": [
+        { "text": " between", "type": "accepted" },
+        { "text": " neurons", "type": "accepted" },
+        { "text": ",", "type": "accepted" },
+        { "text": " called", "type": "accepted" },
+        { "text": " weights", "type": "accepted" }
+      ]
+    },
+    {
+      "round_num": 4,
+      "drafted": 5,
+      "accepted": 3,
+      "corrected": 1,
+      "verification_time_ms": 13.5,
+      "acceptance_rate": 0.6,
+      "tokens": [
+        { "text": ".", "type": "accepted" },
+        { "text": " During", "type": "accepted" },
+        { "text": " training", "type": "accepted" },
+        { "text": " each", "type": "rejected" },
+        { "text": ",", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 5,
+      "drafted": 5,
+      "accepted": 4,
+      "corrected": 1,
+      "verification_time_ms": 12.0,
+      "acceptance_rate": 0.8,
+      "tokens": [
+        { "text": " the", "type": "accepted" },
+        { "text": " network", "type": "accepted" },
+        { "text": " makes", "type": "accepted" },
+        { "text": " a", "type": "accepted" },
+        { "text": " guess", "type": "rejected" },
+        { "text": " prediction", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 6,
+      "drafted": 5,
+      "accepted": 5,
+      "corrected": 0,
+      "verification_time_ms": 10.9,
+      "acceptance_rate": 1.0,
+      "tokens": [
+        { "text": ",", "type": "accepted" },
+        { "text": " compares", "type": "accepted" },
+        { "text": " it", "type": "accepted" },
+        { "text": " to", "type": "accepted" },
+        { "text": " the", "type": "accepted" }
+      ]
+    },
+    {
+      "round_num": 7,
+      "drafted": 5,
+      "accepted": 4,
+      "corrected": 1,
+      "verification_time_ms": 13.2,
+      "acceptance_rate": 0.8,
+      "tokens": [
+        { "text": " correct", "type": "accepted" },
+        { "text": " answer", "type": "accepted" },
+        { "text": ",", "type": "accepted" },
+        { "text": " and", "type": "accepted" },
+        { "text": " updates", "type": "rejected" },
+        { "text": " uses", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 8,
+      "drafted": 5,
+      "accepted": 5,
+      "corrected": 0,
+      "verification_time_ms": 11.4,
+      "acceptance_rate": 1.0,
+      "tokens": [
+        { "text": " backpropagation", "type": "accepted" },
+        { "text": " to", "type": "accepted" },
+        { "text": " reduce", "type": "accepted" },
+        { "text": " the", "type": "accepted" },
+        { "text": " error", "type": "accepted" }
+      ]
+    },
+    {
+      "round_num": 9,
+      "drafted": 5,
+      "accepted": 3,
+      "corrected": 1,
+      "verification_time_ms": 14.7,
+      "acceptance_rate": 0.6,
+      "tokens": [
+        { "text": ".", "type": "accepted" },
+        { "text": " This", "type": "accepted" },
+        { "text": " process", "type": "accepted" },
+        { "text": " happens", "type": "rejected" },
+        { "text": " repeats", "type": "corrected" }
+      ]
+    },
+    {
+      "round_num": 10,
+      "drafted": 5,
+      "accepted": 5,
+      "corrected": 0,
+      "verification_time_ms": 10.5,
+      "acceptance_rate": 1.0,
+      "tokens": [
+        { "text": " over", "type": "accepted" },
+        { "text": " thousands", "type": "accepted" },
+        { "text": " of", "type": "accepted" },
+        { "text": " examples", "type": "accepted" },
+        { "text": ".", "type": "accepted" }
+      ]
+    }
+  ],
+  "summary": {
+    "total_tokens": 51,
+    "draft_tokens_generated": 50,
+    "draft_tokens_accepted": 41,
+    "acceptance_rate": 0.82,
+    "speculation_rounds": 10,
+    "generation_time_ms": 487
+  }
+}
