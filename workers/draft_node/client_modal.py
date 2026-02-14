@@ -186,19 +186,34 @@ class DraftService:
                     current_token_ids.extend(verify_response["corrected_token_ids"])
                     print(f"    Corrected: +{len(verify_response['corrected_token_ids'])} tokens from target")
 
-                # Add to result
+                # Add to result with proper token types
                 eos_reached = False
+
+                # Add accepted tokens
                 for token_id in accepted_tokens:
                     token = {
                         "token_id": token_id,
                         "text": self.tokenizer.decode([token_id]),
                         "logprob": 0.0,
+                        "type": "accepted",
                     }
                     all_tokens.append(token)
                     if eos_token_ids and token_id in eos_token_ids:
                         eos_reached = True
                         break
 
+                # Add rejected token if any
+                if not eos_reached and num_accepted < len(draft_token_ids):
+                    rejected_token_id = draft_token_ids[num_accepted]
+                    rejected_token = {
+                        "token_id": rejected_token_id,
+                        "text": self.tokenizer.decode([rejected_token_id]),
+                        "logprob": 0.0,
+                        "type": "rejected",
+                    }
+                    all_tokens.append(rejected_token)
+
+                # Add corrected tokens
                 if not eos_reached:
                     for i, token_id in enumerate(verify_response["corrected_token_ids"]):
                         corrected_logprobs = verify_response["corrected_logprobs"]
@@ -206,6 +221,7 @@ class DraftService:
                             "token_id": token_id,
                             "text": self.tokenizer.decode([token_id]),
                             "logprob": corrected_logprobs[i] if i < len(corrected_logprobs) else 0.0,
+                            "type": "corrected",
                         }
                         all_tokens.append(token)
                         if eos_token_ids and token_id in eos_token_ids:
@@ -218,6 +234,7 @@ class DraftService:
                         "token_id": verify_response["next_token_id"],
                         "text": self.tokenizer.decode([verify_response["next_token_id"]]),
                         "logprob": verify_response["next_token_logprob"] or 0.0,
+                        "type": "accepted",
                     }
                     all_tokens.append(token)
                     current_token_ids.append(verify_response["next_token_id"])
