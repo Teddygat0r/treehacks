@@ -24,18 +24,10 @@ class DraftNodeClient:
         verification_server="localhost:50051",
         num_draft_tokens=5,
     ):
-        """
-        Initialize draft node for speculative decoding.
-
-        Args:
-            draft_model: Small, fast draft model
-            verification_server: Address of verification service
-            num_draft_tokens: Number of tokens to draft per round
-        """
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
-            gpu_memory_utilization=0.3,
+            gpu_memory_utilization=0.2,  # Reduced memory usage
             max_model_len=2048,
         )
 
@@ -92,8 +84,10 @@ class DraftNodeClient:
             sampling_params = SamplingParams(
                 temperature=request.params.temperature if request.params.temperature > 0 else 0.8,
                 top_k=request.params.top_k if request.params.top_k > 0 else -1,
+                top_p=0.95,
                 max_tokens=num_to_draft,
-                logprobs=1,
+                logprobs=5,  # Get more logprobs
+                seed=42,  # Same seed as target for testing
             )
 
             draft_start = time.time()
@@ -250,7 +244,7 @@ def main():
                 top_k=50,
                 draft_tokens=5,
             ),
-            model_id="facebook/opt-6.7b",
+            model_id="facebook/opt-1.3b",
             timestamp=int(time.time() * 1000),
         )
 
