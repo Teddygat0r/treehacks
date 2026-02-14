@@ -8,15 +8,18 @@ import os
 
 app = modal.App("treehacks-verification-service")
 
-# Image with all dependencies
+# Image with all dependencies - use CUDA development image
+vllm_image = modal.Image.from_registry(
+    "nvidia/cuda:12.4.1-devel-ubuntu22.04",
+    add_python="3.11"
+).pip_install(
+    "vllm",
+    "transformers",
+    "torch",
+)
+
 image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install(
-        "vllm",
-        "transformers",
-        "numpy",
-        "torch",
-    )
+    vllm_image
     .add_local_dir(
         os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "proto"),
         remote_path="/app/proto",
