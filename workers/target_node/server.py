@@ -173,10 +173,14 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
                 pass
 
 
-def serve(port=50051):
+def serve(port=50051, strategy="deterministic", strategy_kwargs=None):
     """Start the verification service gRPC server"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    servicer = VerificationServiceImpl()
+    servicer = VerificationServiceImpl(
+        model_name="facebook/opt-1.3b",
+        strategy=strategy,
+        strategy_kwargs=strategy_kwargs,
+    )
     speculative_decoding_pb2_grpc.add_VerificationServiceServicer_to_server(servicer, server)
 
     server.add_insecure_port(f'[::]:{port}')
@@ -185,6 +189,9 @@ def serve(port=50051):
     print(f"\n{'='*80}")
     print(f"🎯 Verification Service (Target Node) started on port {port}")
     print(f"   Model: facebook/opt-1.3b")
+    print(f"   Strategy: {strategy}")
+    if strategy_kwargs:
+        print(f"   Strategy params: {strategy_kwargs}")
     print(f"   Ready to verify draft tokens from draft nodes")
     print(f"{'='*80}\n")
 
@@ -196,4 +203,23 @@ def serve(port=50051):
 
 
 if __name__ == '__main__':
-    serve()
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Target Node Verification Service')
+    parser.add_argument('--port', type=int, default=50051, help='Port to listen on')
+    parser.add_argument('--strategy', type=str, default='deterministic',
+                        choices=['deterministic', 'probabilistic', 'threshold', 'greedy'],
+                        help='Verification strategy to use')
+    parser.add_argument('--threshold', type=float, default=0.1,
+                        help='Threshold for threshold strategy (default: 0.1)')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Enable verbose logging in verification')
+
+    args = parser.parse_args()
+
+    # Build strategy kwargs
+    strategy_kwargs = {'verbose': args.verbose}
+    if args.strategy == 'threshold':
+        strategy_kwargs['threshold'] = args.threshold
+
+    serve(port=args.port, strategy=args.strategy, strategy_kwargs=strategy_kwargs)

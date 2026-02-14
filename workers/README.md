@@ -7,7 +7,7 @@ Implementation using the treehacks proto definitions for speculative decoding wi
 ```
 ┌──────────────────────┐         ┌────────────────────────┐
 │   Draft Node         │────────>│  Verification Service  │
-│  (opt-125m)          │  gRPC   │  (opt-6.7b)           │
+│  (opt-350m)          │  gRPC   │  (opt-1.3b)           │
 │  Client              │ Verify  │  Server                │
 │  Drafts tokens       │ Draft   │  Port 50051            │
 └──────────────────────┘         └────────────────────────┘
@@ -141,13 +141,18 @@ serve(port=50051)  # Change port here
 ### Draft Node (`draft_node/client.py`)
 ```python
 DraftNodeClient(
-    draft_model="facebook/opt-125m",      # Change draft model
+    draft_model="facebook/opt-350m",       # Change draft model
     verification_server="localhost:50051", # Change server address
     num_draft_tokens=5,                    # Tokens per round
 )
 ```
 
-**GPU Memory:** 30% (adjustable via `gpu_memory_utilization`)
+**GPU Memory:** 20% (adjustable via `gpu_memory_utilization`)
+
+**Model Selection:**
+- `opt-125m`: Too small, ~40% acceptance (not recommended)
+- `opt-350m`: Good balance, ~100% acceptance with greedy decoding (default)
+- `opt-1.3b`: Same as target, 100% acceptance but slower (defeats purpose)
 
 ## Proto Message Types
 
@@ -308,6 +313,88 @@ batch_response = verification_stub.BatchVerify(batch_request)
 ```
 
 This allows verifying multiple draft sequences in one call, improving throughput.
+
+## Verification Strategies
+
+The target node supports multiple verification strategies that determine how draft tokens are accepted/rejected. Each strategy implements a different algorithm:
+
+### Available Strategies
+
+1. **deterministic** (default)
+   - Accept only if draft token exactly matches target token
+   - Simplest approach, good baseline
+   - Expected acceptance: 70-90% for same-family models
+
+2. **probabilistic** (SLED paper)
+   - Implements algorithm from paper: α = min(1, p_target/p_draft)
+   - Probabilistically accepts mismatches based on probabilities
+   - Preserves exact output distribution of target model
+
+3. **threshold**
+   - Accept draft token if p_target(draft_token) > threshold
+   - More lenient than deterministic
+   - Configurable threshold (default: 0.1)
+
+4. **greedy**
+   - Always use target model's top token
+   - Effectively disables speculation (for debugging)
+
+### Testing Strategies
+
+#### Quick Test (Recommended)
+Run a quick test with the current strategy:
+
+```bash
+cd /home/dgorb/Github/treehacks/treehacks/workers
+source /home/dgorb/Github/treehacks/.venv/bin/activate
+python quick_test.py
+```
+
+This runs 3 test prompts and shows average acceptance rate.
+
+#### Full Strategy Comparison
+
+1. Start server with a specific strategy:
+```bash
+# Deterministic (exact match only)
+./start_target_server.sh --strategy deterministic
+
+# Probabilistic (SLED paper algorithm)
+./start_target_server.sh --strategy probabilistic
+
+# Threshold with custom value
+./start_target_server.sh --strategy threshold --threshold 0.2
+
+# Verbose logging (shows token-by-token decisions)
+./start_target_server.sh --strategy deterministic --verbose
+```
+
+2. Run quick test:
+```bash
+python quick_test.py
+```
+
+3. Stop server (Ctrl+C), change strategy, and repeat
+
+#### Strategy Selection Guide
+
+- **Start with deterministic** - Simplest, good baseline
+- **If acceptance is low (<50%)** - Check for bugs, ensure same model family
+- **Try probabilistic** - Theoretically correct, may help with slight mismatches
+- **Try threshold** - More lenient, tune threshold based on results
+- **Use verbose flag** - See detailed token-by-token verification decisions
+
+### Expected Acceptance Rates
+
+| Model Pair | Strategy | Expected Rate | Notes |
+|------------|----------|---------------|-------|
+| OPT-125m → OPT-1.3b | deterministic | 40-50% | Draft too small ❌ |
+| **OPT-350m → OPT-1.3b** | **deterministic** | **90-100%** | **Recommended ✅** |
+| OPT-350m → OPT-1.3b | probabilistic | 80-95% | With sampling |
+| Same family | threshold (0.1) | 75-95% | More lenient |
+| Different families | any | 20-50% | Not recommended |
+
+**Key Insight:** Draft model must be "smart enough" to predict target model's tokens. Too small = low acceptance.
 
 ## Next Steps
 

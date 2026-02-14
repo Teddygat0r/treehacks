@@ -20,7 +20,7 @@ import speculative_decoding_pb2_grpc
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="facebook/opt-125m",
+        draft_model="facebook/opt-350m",  # Changed from 125m for better acceptance
         verification_server="localhost:50051",
         num_draft_tokens=5,
     ):
