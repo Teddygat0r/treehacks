@@ -204,7 +204,7 @@ export function DashboardBody() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Network visualizer strip -- synced to chat phase */}
         <div className="shrink-0 border-b border-border/30 px-4 py-3">
-          <NetworkVisualizer phase={phase} currentToken={currentToken} />
+          <NetworkVisualizer phase={phase} />
         </div>
 
         {/* Chat area */}

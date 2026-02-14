@@ -6,7 +6,6 @@ export type NetworkPhase = "idle" | "drafting" | "verifying" | "correcting" | "c
 
 interface NetworkVisualizerProps {
   phase: NetworkPhase
-  currentToken?: string
 }
 
 const phaseColor: Record<NetworkPhase, string> = {
@@ -15,14 +14,6 @@ const phaseColor: Record<NetworkPhase, string> = {
   verifying: "hsl(48, 96%, 53%)",
   correcting: "hsl(217, 91%, 60%)",
   complete: "hsl(142, 71%, 45%)",
-}
-
-const phaseLabel: Record<NetworkPhase, string> = {
-  idle: "Idle",
-  drafting: "Drafting",
-  verifying: "Verifying",
-  correcting: "Correcting",
-  complete: "Complete",
 }
 
 /* Packet moving from edge -> cloud (draft tokens) */
@@ -75,7 +66,7 @@ function VerifyPacket({ delay, phase }: { delay: number; phase: NetworkPhase }) 
   )
 }
 
-export function NetworkVisualizer({ phase, currentToken }: NetworkVisualizerProps) {
+export function NetworkVisualizer({ phase }: NetworkVisualizerProps) {
   const edgeStroke = phase === "drafting" || phase === "correcting"
     ? "hsl(142, 71%, 45%)"
     : phase === "verifying"
@@ -97,10 +88,10 @@ export function NetworkVisualizer({ phase, currentToken }: NetworkVisualizerProp
   const lineOpacity = phase === "idle" ? 0.15 : 0.5
 
   return (
-    <div className="flex items-center gap-4">
+    <div className="w-full">
       <svg
         viewBox="0 0 440 200"
-        className="h-28 w-full max-w-xl shrink-0"
+        className="h-28 w-full"
         aria-label="Network diagram synchronized to chat"
       >
         {/* ── Edge Node ── */}
@@ -204,74 +195,8 @@ export function NetworkVisualizer({ phase, currentToken }: NetworkVisualizerProp
         <VerifyPacket delay={0.3} phase={phase} />
         <VerifyPacket delay={1.1} phase={phase} />
 
-        {/* ── Phase label ── */}
-        <motion.rect
-          x="175" y="148" width="90" height="24" rx="6"
-          fill="hsl(240, 6%, 10%)"
-          stroke={phaseColor[phase]}
-          strokeWidth="1"
-          animate={{ stroke: phaseColor[phase] }}
-          transition={{ duration: 0.3 }}
-        />
-        <motion.text
-          x="220" y="164"
-          textAnchor="middle"
-          fontSize="10"
-          fontWeight="600"
-          fontFamily="var(--font-space-grotesk), sans-serif"
-          animate={{ fill: phaseColor[phase] }}
-          transition={{ duration: 0.3 }}
-        >
-          {phaseLabel[phase]}
-        </motion.text>
-      </svg>
 
-      {/* Current token indicator */}
-      <div className="flex shrink-0 flex-col gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <motion.span
-            className="relative flex h-2 w-2"
-            animate={phase !== "idle" && phase !== "complete" ? { scale: [1, 1.3, 1] } : {}}
-            transition={{ duration: 1, repeat: Infinity }}
-          >
-            <span
-              className="absolute inline-flex h-full w-full rounded-full opacity-75"
-              style={{ backgroundColor: phaseColor[phase] }}
-            />
-            <span
-              className="relative inline-flex h-2 w-2 rounded-full"
-              style={{ backgroundColor: phaseColor[phase] }}
-            />
-          </motion.span>
-          <span className="font-heading text-xs font-medium" style={{ color: phaseColor[phase] }}>
-            {phaseLabel[phase]}
-          </span>
-        </div>
-        {currentToken && phase !== "idle" && phase !== "complete" && (
-          <motion.span
-            key={currentToken}
-            initial={{ opacity: 0, x: 4 }}
-            animate={{ opacity: 1, x: 0 }}
-            className="max-w-[120px] truncate rounded-md border border-border/30 bg-background/50 px-2 py-1 font-mono text-[11px] text-foreground/70"
-          >
-            {currentToken}
-          </motion.span>
-        )}
-        <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />
-            Draft
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-yellow-400" />
-            Verify
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-blue-400" />
-            Correct
-          </span>
-        </div>
-      </div>
+      </svg>
     </div>
   )
 }
