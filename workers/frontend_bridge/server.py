@@ -25,6 +25,9 @@ MODAL_APP_NAME = os.getenv("MODAL_APP_NAME", "treehacks-verification-service")
 MODAL_CLASS_NAME = os.getenv("MODAL_CLASS_NAME", "VerificationService")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 MOCK_MODE = os.getenv("MOCK_MODE", "").lower() in ("1", "true", "yes")
+TOKEN_SEND_BATCH_SIZE = max(1, int(os.getenv("TOKEN_SEND_BATCH_SIZE", "1")))
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
+PROMPT_FORMAT = os.getenv("PROMPT_FORMAT", "chatml").lower()
 
 app = FastAPI(title="SpecNet Frontend Bridge")
 
@@ -86,6 +89,23 @@ class NetworkStats(BaseModel):
     total_tps: float
     avg_acceptance_rate: float
     avg_cost_per_1k: float
+
+
+def _build_model_prompt(user_prompt: str) -> str:
+    """Build a model prompt with a global system message."""
+    system_prompt = SYSTEM_PROMPT.strip()
+    if not system_prompt:
+        return user_prompt
+
+    if PROMPT_FORMAT == "plain":
+        return f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
+
+    # ChatML format works well for Qwen instruct models.
+    return (
+        f"<|im_start|>system\n{system_prompt}\n<|im_end|>\n"
+        f"<|im_start|>user\n{user_prompt}\n<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
 
 # ── Mock inference (no GPU required) ──
 
@@ -251,9 +271,11 @@ def run_real_inference(prompt: str, params: InferenceRequest):
     import speculative_decoding_pb2
 
     request_id = str(uuid.uuid4())[:8]
+    model_prompt = _build_model_prompt(prompt)
+
     request = speculative_decoding_pb2.InferenceJobRequest(
         request_id=request_id,
-        prompt=prompt,
+        prompt=model_prompt,
         params=common_pb2.InferenceParams(
             max_tokens=params.max_tokens,
             temperature=params.temperature,
@@ -265,39 +287,47 @@ def run_real_inference(prompt: str, params: InferenceRequest):
     )
 
     client = _get_draft_client()
-    response = client.execute_inference(request)
+    final_response = None
 
-    token_events = [
+    for event_type, data, tokens in client.execute_inference_stream(request):
+        if event_type == "round":
+            round_event = RoundEvent(**data)
+            token_events = [
+                TokenEvent(
+                    text=t["text"],
+                    type=t["type"],
+                    token_id=t.get("token_id", 0),
+                    logprob=t.get("logprob", 0.0),
+                )
+                for t in tokens
+            ]
+            yield ("round", round_event, token_events)
+        elif event_type == "done":
+            final_response = data
+
+    if final_response is None:
+        raise RuntimeError("DraftNodeClient did not produce a final inference response")
+
+    final_token_events = [
         TokenEvent(
             text=t.text,
-            # Draft client only returns settled output tokens.
             type="accepted",
             token_id=t.token_id,
             logprob=t.logprob,
         )
-        for t in response.tokens
+        for t in final_response.tokens
     ]
 
-    round_event = RoundEvent(
-        round_num=response.speculation_rounds,
-        drafted=response.draft_tokens_generated,
-        accepted=response.draft_tokens_accepted,
-        corrected=max(0, response.total_tokens - response.draft_tokens_accepted),
-        verification_time_ms=0.0,
-        acceptance_rate=response.acceptance_rate,
-    )
-    yield ("round", round_event, token_events)
-
     summary = InferenceResponse(
-        request_id=response.request_id,
-        generated_text=response.generated_text,
-        tokens=token_events,
-        total_tokens=response.total_tokens,
-        draft_tokens_generated=response.draft_tokens_generated,
-        draft_tokens_accepted=response.draft_tokens_accepted,
-        generation_time_ms=response.generation_time_ms,
-        acceptance_rate=response.acceptance_rate,
-        speculation_rounds=response.speculation_rounds,
+        request_id=final_response.request_id,
+        generated_text=final_response.generated_text,
+        tokens=final_token_events,
+        total_tokens=final_response.total_tokens,
+        draft_tokens_generated=final_response.draft_tokens_generated,
+        draft_tokens_accepted=final_response.draft_tokens_accepted,
+        generation_time_ms=final_response.generation_time_ms,
+        acceptance_rate=final_response.acceptance_rate,
+        speculation_rounds=final_response.speculation_rounds,
     )
     yield ("done", summary, [])
 
@@ -336,28 +366,38 @@ async def ws_stream_inference(websocket: WebSocket):
         raw = await websocket.receive_text()
         params = InferenceRequest(**json.loads(raw))
 
-        loop = asyncio.get_event_loop()
+        token_buffer: list[TokenEvent] = []
 
-        def _run():
-            results = []
-            for event_type, data, tokens in run_inference(params.prompt, params):
-                results.append((event_type, data, tokens))
-            return results
+        async def flush_tokens():
+            nonlocal token_buffer
+            if not token_buffer:
+                return
+            for token in token_buffer:
+                await websocket.send_text(json.dumps({
+                    "type": "token",
+                    "data": token.model_dump(),
+                }))
+            token_buffer = []
 
-        results = await loop.run_in_executor(None, _run)
+        gen = run_inference(params.prompt, params)
+        while True:
+            next_item = await asyncio.to_thread(lambda: next(gen, None))
+            if next_item is None:
+                break
 
-        for event_type, data, tokens in results:
+            event_type, data, tokens = next_item
             if event_type == "round":
                 for token in tokens:
-                    await websocket.send_text(json.dumps({
-                        "type": "token",
-                        "data": token.model_dump(),
-                    }))
+                    token_buffer.append(token)
+                    if len(token_buffer) >= TOKEN_SEND_BATCH_SIZE:
+                        await flush_tokens()
+                await flush_tokens()
                 await websocket.send_text(json.dumps({
                     "type": "round",
                     "data": data.model_dump(),
                 }))
             elif event_type == "done":
+                await flush_tokens()
                 await websocket.send_text(json.dumps({
                     "type": "done",
                     "data": data.model_dump(),
@@ -416,6 +456,19 @@ def get_stats():
 def health():
     return {"status": "ok", "mock": MOCK_MODE}
 
+
+@app.post("/api/warmup")
+async def warmup():
+    """
+    Warm up draft model/client so first prompt has low latency.
+    Triggered by frontend on page load.
+    """
+    if MOCK_MODE:
+        return {"status": "ok", "mock": True, "warmed": False}
+
+    await asyncio.to_thread(_get_draft_client)
+    return {"status": "ok", "mock": False, "warmed": True}
+
 # ── Startup ──
 
 if __name__ == "__main__":
@@ -435,6 +488,8 @@ if __name__ == "__main__":
         print(f"  Modal app: {MODAL_APP_NAME}")
         print(f"  Modal class: {MODAL_CLASS_NAME}")
         print(f"  Draft model: {DRAFT_MODEL}")
+        print(f"  Prompt format: {PROMPT_FORMAT}")
+        print(f"  System prompt enabled: {'yes' if SYSTEM_PROMPT.strip() else 'no'}")
     print(f"{'='*60}\n")
 
     import uvicorn

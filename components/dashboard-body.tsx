@@ -7,7 +7,7 @@ import { ChatPanel, type VisibleToken } from "@/components/chat-panel"
 import { ChatInput } from "@/components/chat-input"
 import { LiveMetrics } from "@/components/live-metrics"
 import { PanelRightOpen, PanelRightClose } from "lucide-react"
-import { streamInference } from "@/lib/api"
+import { streamInference, warmupDraftModel } from "@/lib/api"
 import type { StreamMessage, TokenEvent } from "@/lib/types"
 
 const REJECTED_SHOW_DELAY = 80
@@ -194,6 +194,10 @@ export function DashboardBody() {
 
     cleanupRef.current = cleanup
   }, [emitPacketForWords])
+
+  useEffect(() => {
+    warmupDraftModel()
+  }, [])
 
   useEffect(() => {
     return () => {
