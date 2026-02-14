@@ -31,7 +31,7 @@ def main():
     print("Connecting to verification service at localhost:50051...")
     try:
         client = DraftNodeClient(
-            draft_model="facebook/opt-350m",  # Using larger draft model
+            # Uses default draft model (Qwen/Qwen2.5-1.5B-Instruct)
             verification_server="localhost:50051",
             num_draft_tokens=5,
         )
@@ -53,7 +53,7 @@ def main():
                 top_k=-1,
                 draft_tokens=5,
             ),
-            model_id="facebook/opt-1.3b",
+            model_id="Qwen/Qwen2.5-3B-Instruct",
             timestamp=int(time.time() * 1000),
         )
 

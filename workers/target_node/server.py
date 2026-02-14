@@ -22,14 +22,14 @@ from verification_strategies import get_strategy
 
 
 class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceServicer):
-    def __init__(self, model_name="facebook/opt-1.3b", strategy="deterministic", strategy_kwargs=None):
+    def __init__(self, model_name="Qwen/Qwen2.5-3B-Instruct", strategy="deterministic", strategy_kwargs=None):
         print(f"Initializing verification service with model: {model_name}")
         print(f"Using verification strategy: {strategy}")
 
         self.llm = LLM(
             model=model_name,
-            gpu_memory_utilization=0.4,  # Reduced memory usage
-            max_model_len=2048,
+            gpu_memory_utilization=0.8,  # Adjusted for 3B model
+            max_model_len=4096,  # Llama supports longer context
         )
 
         # Load tokenizer for decoding
@@ -173,11 +173,11 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
                 pass
 
 
-def serve(port=50051, strategy="deterministic", strategy_kwargs=None):
+def serve(port=50051, strategy="deterministic", strategy_kwargs=None, model_name="Qwen/Qwen2.5-3B-Instruct"):
     """Start the verification service gRPC server"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     servicer = VerificationServiceImpl(
-        model_name="facebook/opt-1.3b",
+        model_name=model_name,
         strategy=strategy,
         strategy_kwargs=strategy_kwargs,
     )
@@ -188,7 +188,7 @@ def serve(port=50051, strategy="deterministic", strategy_kwargs=None):
 
     print(f"\n{'='*80}")
     print(f"🎯 Verification Service (Target Node) started on port {port}")
-    print(f"   Model: facebook/opt-1.3b")
+    print(f"   Model: {model_name}")
     print(f"   Strategy: {strategy}")
     if strategy_kwargs:
         print(f"   Strategy params: {strategy_kwargs}")
@@ -207,6 +207,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Target Node Verification Service')
     parser.add_argument('--port', type=int, default=50051, help='Port to listen on')
+    parser.add_argument('--model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
+                        help='Target model to use (default: Qwen/Qwen2.5-3B-Instruct)')
     parser.add_argument('--strategy', type=str, default='deterministic',
                         choices=['deterministic', 'probabilistic', 'threshold', 'greedy'],
                         help='Verification strategy to use')
@@ -222,4 +224,4 @@ if __name__ == '__main__':
     if args.strategy == 'threshold':
         strategy_kwargs['threshold'] = args.threshold
 
-    serve(port=args.port, strategy=args.strategy, strategy_kwargs=strategy_kwargs)
+    serve(port=args.port, strategy=args.strategy, strategy_kwargs=strategy_kwargs, model_name=args.model)

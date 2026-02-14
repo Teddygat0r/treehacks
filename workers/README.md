@@ -261,11 +261,17 @@ treehacks/
 │
 └── workers/
     ├── README.md                         # This file
+    ├── TESTING_GUIDE.md                 # Testing strategies guide
     ├── start_target_server.sh           # Target launcher
     ├── start_draft_client.sh            # Draft launcher
     │
+    ├── benchmark_gsm8k.py               # GSM8K math benchmark
+    ├── quick_test.py                    # Quick acceptance test
+    ├── test_strategies.py               # Strategy comparison tool
+    │
     ├── target_node/
-    │   └── server.py                    # VerificationService impl
+    │   ├── server.py                    # VerificationService impl
+    │   └── verification_strategies.py   # Modular verification strategies
     │
     └── draft_node/
         └── client.py                    # Draft client with spec decoding
@@ -313,6 +319,46 @@ batch_response = verification_stub.BatchVerify(batch_request)
 ```
 
 This allows verifying multiple draft sequences in one call, improving throughput.
+
+## Benchmarking
+
+### GSM8K Math Benchmark
+
+Test speculative decoding performance on grade school math questions:
+
+```bash
+# Basic benchmark (10 questions, built-in samples)
+python benchmark_gsm8k.py
+
+# Full benchmark with HuggingFace dataset
+pip install datasets
+python benchmark_gsm8k.py --num-samples 50 --use-hf
+
+# Custom configuration
+python benchmark_gsm8k.py \
+  --draft-model facebook/opt-350m \
+  --num-samples 20 \
+  --max-tokens 512 \
+  --temperature 0.0
+```
+
+**Options:**
+- `--draft-model`: Draft model to use (default: opt-350m)
+- `--num-samples`: Number of questions (default: 10)
+- `--max-tokens`: Max tokens per answer (default: 512)
+- `--temperature`: Sampling temperature (default: 0.0)
+- `--use-hf`: Load full dataset from HuggingFace
+
+**Output:**
+- Console: Detailed results with acceptance rates and speed
+- JSON file: `gsm8k_benchmark_<timestamp>.json` with all metrics
+
+**Metrics Tracked:**
+- Average acceptance rate across all questions
+- Tokens per second (generation speed)
+- Draft tokens generated vs accepted
+- Per-question breakdown
+- Acceptance rate distribution
 
 ## Verification Strategies
 

@@ -20,15 +20,15 @@ import speculative_decoding_pb2_grpc
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="facebook/opt-350m",  # Changed from 125m for better acceptance
+        draft_model="Qwen/Qwen2.5-1.5B-Instruct",  # Match Qwen family for target
         verification_server="localhost:50051",
         num_draft_tokens=5,
     ):
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
-            gpu_memory_utilization=0.2,  # Reduced memory usage
-            max_model_len=2048,
+            gpu_memory_utilization=0.3,  # Adjusted for Llama
+            max_model_len=4096,  # Match target context length
         )
 
         self.num_draft_tokens = num_draft_tokens
@@ -244,7 +244,7 @@ def main():
                 top_k=50,
                 draft_tokens=5,
             ),
-            model_id="facebook/opt-1.3b",
+            model_id="meta-llama/Llama-3.2-3B",
             timestamp=int(time.time() * 1000),
         )
 
