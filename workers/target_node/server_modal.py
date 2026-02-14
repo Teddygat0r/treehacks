@@ -39,7 +39,7 @@ image = (
 )
 @modal.concurrent(max_inputs=10)
 class VerificationService:
-    model_name: str = "Qwen/Qwen2.5-3B-Instruct"
+    model_name: str = "Qwen/Qwen3-32B-Instruct"
     strategy: str = "deterministic"
 
     @modal.enter()
