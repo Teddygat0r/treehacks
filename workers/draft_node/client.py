@@ -26,13 +26,15 @@ class Token:
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="Qwen/Qwen2.5-1.5B-Instruct",
+        draft_model="Qwen/Qwen3-4B-Instruct",
         num_draft_tokens=5,
+        modal_app_name="treehacks-verification-service",
+        modal_class_name="VerificationService",
     ):
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
-            gpu_memory_utilization=0.3,
+            gpu_memory_utilization=0.7,
             max_model_len=4096,
         )
 
@@ -44,20 +46,22 @@ class DraftNodeClient:
         # Connect to Modal verification service
         print("Connecting to Modal verification service...")
         self.verification_service = modal.Cls.from_name(
-            "treehacks-verification-service", "VerificationService"
+            modal_app_name, modal_class_name
         )()
 
         print("Draft node ready!")
 
-    def execute_inference(self, request):
+    def execute_inference_stream(self, request):
         """
-        Execute inference with speculative decoding.
+        Execute inference with speculative decoding and stream round events.
 
         Args:
             request: InferenceJobRequest
 
         Returns:
-            InferenceJobResponse
+            Yields tuples of:
+            - ("round", round_event_dict, token_event_dicts)
+            - ("done", InferenceJobResponse, [])
         """
         start_time = time.time()
 
@@ -147,14 +151,41 @@ class DraftNodeClient:
 
                 print(f"    Verified: {num_accepted}/{len(draft_token_ids)} accepted ({verify_response['acceptance_rate']:.1%})")
 
+                round_token_events = []
+
                 # Accept the verified tokens
                 accepted_tokens = draft_token_ids[:num_accepted]
                 current_token_ids.extend(accepted_tokens)
+
+                for token_id in accepted_tokens:
+                    round_token_events.append({
+                        "text": self.tokenizer.decode([token_id]),
+                        "type": "accepted",
+                        "token_id": token_id,
+                        "logprob": 0.0,
+                    })
+
+                if num_accepted < len(draft_token_ids):
+                    rejected_token_id = draft_token_ids[num_accepted]
+                    round_token_events.append({
+                        "text": self.tokenizer.decode([rejected_token_id]),
+                        "type": "rejected",
+                        "token_id": rejected_token_id,
+                        "logprob": 0.0,
+                    })
 
                 # Add corrected token if any
                 if verify_response["corrected_token_ids"]:
                     current_token_ids.extend(verify_response["corrected_token_ids"])
                     print(f"    Corrected: +{len(verify_response['corrected_token_ids'])} tokens from target")
+                    for i, token_id in enumerate(verify_response["corrected_token_ids"]):
+                        corrected_logprobs = verify_response["corrected_logprobs"]
+                        round_token_events.append({
+                            "text": self.tokenizer.decode([token_id]),
+                            "type": "corrected",
+                            "token_id": token_id,
+                            "logprob": corrected_logprobs[i] if i < len(corrected_logprobs) else 0.0,
+                        })
 
                 # Add to result
                 eos_reached = False
@@ -192,6 +223,12 @@ class DraftNodeClient:
                     all_tokens.append(token)
                     current_token_ids.append(verify_response["next_token_id"])
                     eos_reached = True
+                    round_token_events.append({
+                        "text": token.text,
+                        "type": "accepted",
+                        "token_id": token.token_id,
+                        "logprob": token.logprob,
+                    })
 
                 if eos_reached:
                     eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
@@ -202,6 +239,16 @@ class DraftNodeClient:
 
                 # Update current text
                 current_text = self.tokenizer.decode(current_token_ids, skip_special_tokens=True)
+
+                round_event = {
+                    "round_num": speculation_rounds,
+                    "drafted": len(draft_token_ids),
+                    "accepted": num_accepted,
+                    "corrected": len(verify_response["corrected_token_ids"]),
+                    "verification_time_ms": float(verify_response.get("verification_time_ms", 0.0)),
+                    "acceptance_rate": float(verify_response.get("acceptance_rate", 0.0)),
+                }
+                yield ("round", round_event, round_token_events)
 
             except Exception as e:
                 print(f"Error during verification: {e}")
@@ -237,7 +284,15 @@ class DraftNodeClient:
             speculation_rounds=speculation_rounds,
         )
 
-        return response
+        yield ("done", response, [])
+
+    def execute_inference(self, request):
+        """Execute inference and return only final response (non-streaming helper)."""
+        result = None
+        for event_type, data, _ in self.execute_inference_stream(request):
+            if event_type == "done":
+                result = data
+        return result
 
     def __del__(self):
         """Cleanup"""
