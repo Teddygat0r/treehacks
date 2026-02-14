@@ -28,11 +28,13 @@ class DraftNodeClient:
         self,
         draft_model="Qwen/Qwen2.5-1.5B-Instruct",
         num_draft_tokens=5,
+        modal_app_name="treehacks-verification-service",
+        modal_class_name="VerificationService",
     ):
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
-            gpu_memory_utilization=0.3,
+            gpu_memory_utilization=0.7,
             max_model_len=4096,
         )
 
@@ -44,7 +46,7 @@ class DraftNodeClient:
         # Connect to Modal verification service
         print("Connecting to Modal verification service...")
         self.verification_service = modal.Cls.from_name(
-            "treehacks-verification-service", "VerificationService"
+            modal_app_name, modal_class_name
         )()
 
         print("Draft node ready!")

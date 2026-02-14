@@ -1,6 +1,6 @@
 """
-Frontend Bridge - FastAPI server bridging Next.js frontend to gRPC backend.
-Translates HTTP/WebSocket requests into gRPC calls to the draft/target nodes.
+Frontend Bridge - FastAPI server bridging Next.js frontend to Modal backend.
+Translates HTTP/WebSocket requests into calls to draft/target nodes.
 
 Run with --mock to simulate speculative decoding without vLLM/GPU:
     python workers/frontend_bridge/server.py --mock
@@ -21,7 +21,8 @@ from pydantic import BaseModel, Field
 # ── Configuration ──
 
 DRAFT_MODEL = os.getenv("DRAFT_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-VERIFICATION_SERVER = os.getenv("VERIFICATION_SERVER", "localhost:50051")
+MODAL_APP_NAME = os.getenv("MODAL_APP_NAME", "treehacks-verification-service")
+MODAL_CLASS_NAME = os.getenv("MODAL_CLASS_NAME", "VerificationService")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 MOCK_MODE = os.getenv("MOCK_MODE", "").lower() in ("1", "true", "yes")
 
@@ -226,166 +227,77 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
 
     yield ("done", summary, [])
 
-# ── Real inference (requires vLLM + GPU + gRPC target) ──
+# ── Real inference (delegated to DraftNodeClient + Modal target) ──
 
-def _get_grpc_stub():
-    if not hasattr(_get_grpc_stub, "_channel"):
-        import grpc
-        _get_grpc_stub._channel = grpc.insecure_channel(VERIFICATION_SERVER)
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
-        import speculative_decoding_pb2_grpc
-        _get_grpc_stub._stub = speculative_decoding_pb2_grpc.VerificationServiceStub(_get_grpc_stub._channel)
-    return _get_grpc_stub._stub
+def _get_draft_client():
+    if not hasattr(_get_draft_client, "_client"):
+        from workers.draft_node.client import DraftNodeClient
+        _get_draft_client._client = DraftNodeClient(
+            draft_model=DRAFT_MODEL,
+            num_draft_tokens=5,
+            modal_app_name=MODAL_APP_NAME,
+            modal_class_name=MODAL_CLASS_NAME,
+        )
+    return _get_draft_client._client
+
 
 def run_real_inference(prompt: str, params: InferenceRequest):
     """
-    Run speculative decoding with real vLLM models + gRPC verification.
+    Run speculative decoding through DraftNodeClient.
     Yields (event_type, data, tokens) tuples.
     """
-    from vllm import LLM, SamplingParams
-    from transformers import AutoTokenizer
-    import grpc
-
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "proto"))
     import common_pb2
     import speculative_decoding_pb2
 
-    if not hasattr(run_real_inference, "_llm"):
-        print(f"Loading draft model: {DRAFT_MODEL}")
-        run_real_inference._llm = LLM(
-            model=DRAFT_MODEL,
-            gpu_memory_utilization=0.3,
-            max_model_len=4096,
-        )
-        run_real_inference._tokenizer = AutoTokenizer.from_pretrained(DRAFT_MODEL)
-        print("Draft model loaded!")
-
-    llm = run_real_inference._llm
-    tokenizer = run_real_inference._tokenizer
-    stub = _get_grpc_stub()
-
     request_id = str(uuid.uuid4())[:8]
-    current_text = prompt
-    current_token_ids = tokenizer.encode(current_text)
-    all_token_events: list[TokenEvent] = []
-
-    total_draft_generated = 0
-    total_draft_accepted = 0
-    speculation_rounds = 0
-    start_time = time.time()
-
-    eos_token_ids = set()
-    if getattr(tokenizer, 'eos_token_id', None) is not None:
-        eos_token_ids.add(tokenizer.eos_token_id)
-    for token in ("<|endoftext|>", "<|im_end|>"):
-        if token in tokenizer.get_vocab():
-            eos_token_ids.add(tokenizer.convert_tokens_to_ids(token))
-
-    while len(all_token_events) < params.max_tokens:
-        speculation_rounds += 1
-        num_to_draft = min(params.draft_tokens, params.max_tokens - len(all_token_events))
-
-        sampling_params = SamplingParams(
+    request = speculative_decoding_pb2.InferenceJobRequest(
+        request_id=request_id,
+        prompt=prompt,
+        params=common_pb2.InferenceParams(
+            max_tokens=params.max_tokens,
             temperature=params.temperature,
-            top_k=params.top_k if params.top_k > 0 else -1,
-            top_p=0.95,
-            max_tokens=num_to_draft,
-            logprobs=5,
-            seed=42,
+            top_k=params.top_k,
+            draft_tokens=params.draft_tokens,
+        ),
+        model_id=DRAFT_MODEL,
+        timestamp=int(time.time() * 1000),
+    )
+
+    client = _get_draft_client()
+    response = client.execute_inference(request)
+
+    token_events = [
+        TokenEvent(
+            text=t.text,
+            # Draft client only returns settled output tokens.
+            type="accepted",
+            token_id=t.token_id,
+            logprob=t.logprob,
         )
+        for t in response.tokens
+    ]
 
-        outputs = llm.generate(prompts=[current_text], sampling_params=sampling_params, use_tqdm=False)
-        draft_output = outputs[0].outputs[0]
-        draft_token_ids = draft_output.token_ids
-        if not draft_token_ids:
-            break
-
-        total_draft_generated += len(draft_token_ids)
-
-        draft_logprobs = []
-        if draft_output.logprobs:
-            for token_logprobs in draft_output.logprobs:
-                token_id = list(token_logprobs.keys())[0]
-                draft_logprobs.append(token_logprobs[token_id].logprob)
-
-        try:
-            verify_request = speculative_decoding_pb2.VerificationRequest(
-                request_id=request_id,
-                session_id="session-0",
-                prefix_token_ids=current_token_ids,
-                draft_token_ids=draft_token_ids,
-                draft_logprobs=draft_logprobs,
-                temperature=params.temperature,
-                top_k=params.top_k if params.top_k > 0 else -1,
-            )
-            verify_response = stub.VerifyDraft(verify_request)
-        except grpc.RpcError as e:
-            print(f"gRPC error: {e}")
-            break
-
-        num_accepted = verify_response.num_accepted_tokens
-        total_draft_accepted += num_accepted
-
-        round_token_events: list[TokenEvent] = []
-        eos_reached = False
-
-        for i, tid in enumerate(draft_token_ids):
-            text = tokenizer.decode([tid])
-            if i < num_accepted:
-                round_token_events.append(TokenEvent(text=text, type="accepted", token_id=tid))
-                current_token_ids.append(tid)
-                if eos_token_ids and tid in eos_token_ids:
-                    eos_reached = True
-                    break
-            else:
-                round_token_events.append(TokenEvent(text=text, type="rejected", token_id=tid))
-                break
-
-        if not eos_reached and verify_response.corrected_token_ids:
-            for j, tid in enumerate(verify_response.corrected_token_ids):
-                text = tokenizer.decode([tid])
-                round_token_events.append(TokenEvent(
-                    text=text, type="corrected", token_id=tid,
-                    logprob=verify_response.corrected_logprobs[j] if j < len(verify_response.corrected_logprobs) else 0.0,
-                ))
-                current_token_ids.append(tid)
-                if eos_token_ids and tid in eos_token_ids:
-                    eos_reached = True
-                    break
-
-        if not eos_reached and eos_token_ids and verify_response.next_token_id in eos_token_ids:
-            eos_reached = True
-
-        all_token_events.extend(round_token_events)
-
-        round_event = RoundEvent(
-            round_num=speculation_rounds,
-            drafted=len(draft_token_ids),
-            accepted=num_accepted,
-            corrected=len(verify_response.corrected_token_ids),
-            verification_time_ms=verify_response.verification_time_ms,
-            acceptance_rate=verify_response.acceptance_rate,
-        )
-        yield ("round", round_event, round_token_events)
-
-        if eos_reached:
-            break
-        current_text = tokenizer.decode(current_token_ids, skip_special_tokens=True)
-
-    elapsed = (time.time() - start_time) * 1000
-    acceptance_rate = total_draft_accepted / total_draft_generated if total_draft_generated > 0 else 0.0
-    final_text = run_real_inference._tokenizer.decode(current_token_ids, skip_special_tokens=True)
+    round_event = RoundEvent(
+        round_num=response.speculation_rounds,
+        drafted=response.draft_tokens_generated,
+        accepted=response.draft_tokens_accepted,
+        corrected=max(0, response.total_tokens - response.draft_tokens_accepted),
+        verification_time_ms=0.0,
+        acceptance_rate=response.acceptance_rate,
+    )
+    yield ("round", round_event, token_events)
 
     summary = InferenceResponse(
-        request_id=request_id,
-        generated_text=final_text,
-        tokens=all_token_events,
-        total_tokens=len(all_token_events),
-        draft_tokens_generated=total_draft_generated,
-        draft_tokens_accepted=total_draft_accepted,
-        generation_time_ms=elapsed,
-        acceptance_rate=acceptance_rate,
-        speculation_rounds=speculation_rounds,
+        request_id=response.request_id,
+        generated_text=response.generated_text,
+        tokens=token_events,
+        total_tokens=response.total_tokens,
+        draft_tokens_generated=response.draft_tokens_generated,
+        draft_tokens_accepted=response.draft_tokens_accepted,
+        generation_time_ms=response.generation_time_ms,
+        acceptance_rate=response.acceptance_rate,
+        speculation_rounds=response.speculation_rounds,
     )
     yield ("done", summary, [])
 
@@ -518,9 +430,10 @@ if __name__ == "__main__":
     print(f"\n{'='*60}")
     print(f"  SpecNet Frontend Bridge")
     print(f"  Port: {args.port}")
-    print(f"  Mode: {'MOCK (no GPU)' if MOCK_MODE else 'LIVE (vLLM + gRPC)'}")
+    print(f"  Mode: {'MOCK (no GPU)' if MOCK_MODE else 'LIVE (vLLM + Modal)'}")
     if not MOCK_MODE:
-        print(f"  Verification server: {VERIFICATION_SERVER}")
+        print(f"  Modal app: {MODAL_APP_NAME}")
+        print(f"  Modal class: {MODAL_CLASS_NAME}")
         print(f"  Draft model: {DRAFT_MODEL}")
     print(f"{'='*60}\n")
 
