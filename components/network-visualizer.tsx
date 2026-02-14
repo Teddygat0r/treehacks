@@ -1,8 +1,15 @@
 "use client"
 
-import { motion } from "framer-motion"
+import { motion, AnimatePresence } from "framer-motion"
 
 export type NetworkPhase = "idle" | "drafting" | "verifying" | "correcting" | "complete"
+
+export interface PacketEvent {
+  id: number
+  direction: "ltr" | "rtl"
+  lane: "draft" | "verify"
+  color: string
+}
 
 const phaseColor: Record<NetworkPhase, string> = {
   idle: "hsl(240, 5%, 35%)",
@@ -12,17 +19,17 @@ const phaseColor: Record<NetworkPhase, string> = {
   complete: "hsl(142, 71%, 45%)",
 }
 
-/* ── Animated packet (a dot that travels across the connection lane) ── */
-function Packet({
+/* ── Single packet that flies across once then unmounts ── */
+const PACKET_DURATION = 0.35
+
+function FlyingPacket({
   direction,
-  delay,
-  active,
   color,
+  onDone,
 }: {
   direction: "ltr" | "rtl"
-  delay: number
-  active: boolean
   color: string
+  onDone: () => void
 }) {
   const from = direction === "ltr" ? "0%" : "100%"
   const to = direction === "ltr" ? "100%" : "0%"
@@ -30,28 +37,16 @@ function Packet({
   return (
     <motion.div
       className="absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
-      style={{ backgroundColor: color }}
-      initial={{ left: from, opacity: 0 }}
-      animate={
-        active
-          ? {
-              left: [from, to],
-              opacity: [0, 1, 1, 0],
-            }
-          : { left: from, opacity: 0 }
-      }
-      transition={{
-        duration: 1.6,
-        delay,
-        repeat: active ? Infinity : 0,
-        repeatDelay: 0.5,
-        ease: "easeInOut",
-      }}
+      style={{ backgroundColor: color, boxShadow: `0 0 8px 2px ${color}` }}
+      initial={{ left: from, opacity: 0, scale: 0.5 }}
+      animate={{ left: to, opacity: [0, 1, 1, 0], scale: [0.5, 1.2, 1, 0.5] }}
+      transition={{ duration: PACKET_DURATION, ease: "easeInOut" }}
+      onAnimationComplete={onDone}
     />
   )
 }
 
-/* ── Node card (Edge or Cloud) ── */
+/* ── Node card ── */
 function NodeBox({
   label,
   sublabel,
@@ -67,35 +62,27 @@ function NodeBox({
 
   return (
     <motion.div
-      className="relative flex w-32 shrink-0 flex-col items-center justify-center rounded-xl border-2 px-3 py-4 md:w-40 lg:w-48"
+      className="relative flex w-28 shrink-0 flex-col items-center justify-center rounded-xl border-2 px-3 py-3 sm:w-32 md:w-36 lg:w-40"
       style={{
         backgroundColor: "hsl(240, 6%, 8%)",
         borderColor: strokeColor,
       }}
       animate={{ borderColor: strokeColor }}
-      transition={{ duration: 0.3 }}
+      transition={{ duration: 0.2 }}
     >
-      {/* Outer glow */}
       {isActive && (
         <motion.div
           className="pointer-events-none absolute inset-0 rounded-xl"
-          style={{
-            boxShadow: `0 0 20px 4px ${strokeColor}`,
-          }}
+          style={{ boxShadow: `0 0 20px 4px ${strokeColor}` }}
           animate={{ opacity: [0.05, 0.15, 0.05] }}
           transition={{ duration: 2, repeat: Infinity }}
         />
       )}
 
-      {/* Status dot */}
       <motion.div
         className="absolute left-3 top-3 h-2 w-2 rounded-full"
         style={{ backgroundColor: phaseColor[phase] }}
-        animate={
-          isActive
-            ? { scale: [1, 1.5, 1] }
-            : { scale: 1 }
-        }
+        animate={isActive ? { scale: [1, 1.5, 1] } : { scale: 1 }}
         transition={{ duration: 1.2, repeat: Infinity }}
       />
 
@@ -112,19 +99,20 @@ function NodeBox({
   )
 }
 
-/* ── Connection lane (the stretchy middle area between nodes) ── */
+/* ── Connection lane with event-driven packets ── */
 function ConnectionLane({
   phase,
+  packets,
+  onPacketDone,
 }: {
   phase: NetworkPhase
+  packets: PacketEvent[]
+  onPacketDone: (id: number) => void
 }) {
-  const lineOpacity = phase === "idle" ? 0.12 : 0.4
-  const draftActive = phase === "drafting" || phase === "correcting"
-  const verifyActive = phase === "verifying" || phase === "drafting"
-  const draftColor =
-    phase === "correcting" ? "hsl(217, 91%, 60%)" : "hsl(142, 71%, 45%)"
-  const verifyColor =
-    phase === "verifying" ? "hsl(48, 96%, 53%)" : "hsl(217, 91%, 60%)"
+  const lineOpacity = phase === "idle" ? 0.12 : 0.35
+
+  const draftPackets = packets.filter((p) => p.lane === "draft")
+  const verifyPackets = packets.filter((p) => p.lane === "verify")
 
   return (
     <div className="relative flex flex-1 flex-col justify-center gap-5">
@@ -136,21 +124,28 @@ function ConnectionLane({
         <motion.div
           className="h-px w-full"
           style={{
-            backgroundImage: `repeating-linear-gradient(to right, hsl(142, 71%, 45%) 0px, hsl(142, 71%, 45%) 6px, transparent 6px, transparent 12px)`,
+            backgroundImage:
+              "repeating-linear-gradient(to right, hsl(142, 71%, 45%) 0px, hsl(142, 71%, 45%) 6px, transparent 6px, transparent 12px)",
           }}
           animate={{ opacity: lineOpacity }}
           transition={{ duration: 0.3 }}
         />
-        {/* Arrow */}
         <div
           className="ml-[-6px] h-0 w-0 shrink-0 border-y-[4px] border-l-[6px] border-y-transparent"
-          style={{ borderLeftColor: `hsl(142, 71%, 45%)`, opacity: lineOpacity }}
+          style={{ borderLeftColor: "hsl(142, 71%, 45%)", opacity: lineOpacity }}
         />
-        {/* Packets */}
+        {/* Event-driven packets */}
         <div className="absolute inset-0">
-          <Packet direction="ltr" delay={0} active={draftActive} color={draftColor} />
-          <Packet direction="ltr" delay={0.7} active={draftActive} color={draftColor} />
-          <Packet direction="ltr" delay={1.4} active={draftActive} color={draftColor} />
+          <AnimatePresence>
+            {draftPackets.map((p) => (
+              <FlyingPacket
+                key={p.id}
+                direction={p.direction}
+                color={p.color}
+                onDone={() => onPacketDone(p.id)}
+              />
+            ))}
+          </AnimatePresence>
         </div>
       </div>
 
@@ -159,23 +154,30 @@ function ConnectionLane({
         <span className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 text-[9px] text-muted-foreground/60 md:text-[10px]">
           Verified Tokens
         </span>
-        {/* Arrow */}
         <div
           className="mr-[-6px] h-0 w-0 shrink-0 border-y-[4px] border-r-[6px] border-y-transparent"
-          style={{ borderRightColor: `hsl(217, 91%, 60%)`, opacity: lineOpacity }}
+          style={{ borderRightColor: "hsl(217, 91%, 60%)", opacity: lineOpacity }}
         />
         <motion.div
           className="h-px w-full"
           style={{
-            backgroundImage: `repeating-linear-gradient(to right, hsl(217, 91%, 60%) 0px, hsl(217, 91%, 60%) 6px, transparent 6px, transparent 12px)`,
+            backgroundImage:
+              "repeating-linear-gradient(to right, hsl(217, 91%, 60%) 0px, hsl(217, 91%, 60%) 6px, transparent 6px, transparent 12px)",
           }}
           animate={{ opacity: lineOpacity }}
           transition={{ duration: 0.3 }}
         />
-        {/* Packets */}
         <div className="absolute inset-0">
-          <Packet direction="rtl" delay={0.3} active={verifyActive} color={verifyColor} />
-          <Packet direction="rtl" delay={1.1} active={verifyActive} color={verifyColor} />
+          <AnimatePresence>
+            {verifyPackets.map((p) => (
+              <FlyingPacket
+                key={p.id}
+                direction={p.direction}
+                color={p.color}
+                onDone={() => onPacketDone(p.id)}
+              />
+            ))}
+          </AnimatePresence>
         </div>
       </div>
     </div>
@@ -185,9 +187,11 @@ function ConnectionLane({
 /* ── Main export ── */
 interface NetworkVisualizerProps {
   phase: NetworkPhase
+  packets: PacketEvent[]
+  onPacketDone: (id: number) => void
 }
 
-export function NetworkVisualizer({ phase }: NetworkVisualizerProps) {
+export function NetworkVisualizer({ phase, packets, onPacketDone }: NetworkVisualizerProps) {
   const edgeStroke =
     phase === "drafting" || phase === "correcting"
       ? "hsl(142, 71%, 45%)"
@@ -211,7 +215,7 @@ export function NetworkVisualizer({ phase }: NetworkVisualizerProps) {
   return (
     <div className="flex w-full items-center gap-4 px-2 md:gap-6 md:px-4 lg:gap-8">
       <NodeBox label="Edge Draft" sublabel="RTX 3060" phase={phase} strokeColor={edgeStroke} />
-      <ConnectionLane phase={phase} />
+      <ConnectionLane phase={phase} packets={packets} onPacketDone={onPacketDone} />
       <NodeBox label="Cloud Target" sublabel="H100" phase={phase} strokeColor={cloudStroke} />
     </div>
   )

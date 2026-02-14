@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { NetworkVisualizer, type NetworkPhase } from "@/components/network-visualizer"
+import { NetworkVisualizer, type NetworkPhase, type PacketEvent } from "@/components/network-visualizer"
 import { ChatPanel, type VisibleToken } from "@/components/chat-panel"
 import { ChatInput } from "@/components/chat-input"
 import { LiveMetrics } from "@/components/live-metrics"
@@ -116,8 +116,20 @@ export function DashboardBody() {
   const [visibleTokens, setVisibleTokens] = useState<VisibleToken[]>([])
   const [done, setDone] = useState(false)
   const [counts, setCounts] = useState({ accepted: 0, rejected: 0, corrected: 0, drafted: 0 })
+  const [packets, setPackets] = useState<PacketEvent[]>([])
+  const packetId = useRef(0)
   const stepIdx = useRef(0)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const emitPacket = useCallback((lane: "draft" | "verify", color: string) => {
+    const id = packetId.current++
+    const direction = lane === "draft" ? "ltr" as const : "rtl" as const
+    setPackets((prev) => [...prev, { id, direction, lane, color }])
+  }, [])
+
+  const handlePacketDone = useCallback((id: number) => {
+    setPackets((prev) => prev.filter((p) => p.id !== id))
+  }, [])
 
   const processStep = useCallback(() => {
     if (stepIdx.current >= STEPS.length) {
@@ -133,6 +145,8 @@ export function DashboardBody() {
     if (step.kind === "accepted") {
       setPhase("drafting")
       setCurrentToken(step.token.text.trim())
+      emitPacket("draft", "hsl(142, 71%, 45%)")
+      emitPacket("verify", "hsl(217, 91%, 60%)")
       setVisibleTokens(prev => [...prev, { text: step.token.text, type: step.token.type, phase: "settled" }])
       setCounts(prev => ({
         ...prev,
@@ -145,6 +159,7 @@ export function DashboardBody() {
       // Drafting the rejected token
       setPhase("drafting")
       setCurrentToken(step.rejected.text.trim())
+      emitPacket("draft", "hsl(142, 71%, 45%)")
       setVisibleTokens(prev => [...prev, { text: step.rejected.text, type: "rejected", phase: "appearing" }])
       setCounts(prev => ({ ...prev, drafted: prev.drafted + 1 }))
 
@@ -152,6 +167,7 @@ export function DashboardBody() {
       timeoutRef.current = setTimeout(() => {
         setPhase("verifying")
         setCurrentToken(step.rejected.text.trim())
+        emitPacket("verify", "hsl(48, 96%, 53%)")
         setVisibleTokens(prev => {
           const copy = [...prev]
           copy[copy.length - 1] = { ...copy[copy.length - 1], phase: "striking" }
@@ -170,6 +186,8 @@ export function DashboardBody() {
           timeoutRef.current = setTimeout(() => {
             setPhase("correcting")
             setCurrentToken(step.corrected.text.trim())
+            emitPacket("draft", "hsl(217, 91%, 60%)")
+            emitPacket("verify", "hsl(217, 91%, 60%)")
             setVisibleTokens(prev => {
               const withoutHidden = prev.filter(t => t.phase !== "hidden")
               return [...withoutHidden, { text: step.corrected.text, type: "corrected", phase: "appearing" }]
@@ -189,7 +207,7 @@ export function DashboardBody() {
         }, STRIKE_PAUSE)
       }, REJECTED_SHOW_DELAY)
     }
-  }, [])
+  }, [emitPacket])
 
   useEffect(() => {
     timeoutRef.current = setTimeout(processStep, INITIAL_DELAY)
@@ -204,7 +222,7 @@ export function DashboardBody() {
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Network visualizer strip -- synced to chat phase */}
         <div className="shrink-0 border-b border-border/30 px-4 py-3">
-          <NetworkVisualizer phase={phase} />
+          <NetworkVisualizer phase={phase} packets={packets} onPacketDone={handlePacketDone} />
         </div>
 
         {/* Chat area */}
