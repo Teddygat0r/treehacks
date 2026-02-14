@@ -12,15 +12,22 @@ import {
 } from "recharts"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Activity } from "lucide-react"
+import { useEffect, useState } from "react"
 
-const CHART_DATA = [
-  { day: "Mon", tokens: 520000 },
-  { day: "Tue", tokens: 680000 },
-  { day: "Wed", tokens: 590000 },
-  { day: "Thu", tokens: 740000 },
-  { day: "Fri", tokens: 620000 },
-  { day: "Sat", tokens: 480000 },
-  { day: "Sun", tokens: 570000 },
+interface ActivityDataPoint {
+  time: string
+  tokens: number
+  earnings: number
+  requests: number
+}
+
+const EMPTY_CHART_DATA = [
+  { time: "00:00", tokens: 0 },
+  { time: "04:00", tokens: 0 },
+  { time: "08:00", tokens: 0 },
+  { time: "12:00", tokens: 0 },
+  { time: "16:00", tokens: 0 },
+  { time: "20:00", tokens: 0 },
 ]
 
 const GREEN = "hsl(142, 71%, 45%)"
@@ -56,6 +63,28 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
 }
 
 export function ActivityChart() {
+  const [activityData, setActivityData] = useState<ActivityDataPoint[]>([])
+
+  useEffect(() => {
+    // Fetch activity on mount
+    fetch("http://localhost:8000/api/provider/activity?hours=24")
+      .then((res) => res.json())
+      .then((data) => setActivityData(data.activity))
+      .catch((err) => console.error("Failed to fetch activity:", err))
+
+    // Poll for updates every 10 seconds
+    const interval = setInterval(() => {
+      fetch("http://localhost:8000/api/provider/activity?hours=24")
+        .then((res) => res.json())
+        .then((data) => setActivityData(data.activity))
+        .catch((err) => console.error("Failed to fetch activity:", err))
+    }, 10000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  const chartData = activityData.length > 0 ? activityData : EMPTY_CHART_DATA
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -66,14 +95,14 @@ export function ActivityChart() {
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
             <Activity className="h-4 w-4 text-primary" />
-            Tokens Drafted — Last 7 Days
+            Tokens Drafted — Last 24 Hours
           </CardTitle>
         </CardHeader>
         <CardContent className="pb-4 pr-2">
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
-                data={CHART_DATA}
+                data={chartData}
                 margin={{ top: 8, right: 8, left: -16, bottom: 0 }}
               >
                 <defs>
@@ -88,7 +117,7 @@ export function ActivityChart() {
                   vertical={false}
                 />
                 <XAxis
-                  dataKey="day"
+                  dataKey="time"
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 11, fill: "hsl(240, 5%, 55%)" }}

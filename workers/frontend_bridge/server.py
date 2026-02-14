@@ -17,6 +17,9 @@ import argparse
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
+from collections import defaultdict
 
 # ── Configuration ──
 
@@ -29,7 +32,147 @@ TOKEN_SEND_BATCH_SIZE = max(1, int(os.getenv("TOKEN_SEND_BATCH_SIZE", "1")))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 PROMPT_FORMAT = os.getenv("PROMPT_FORMAT", "chatml").lower()
 
+# ── Pricing Configuration ──
+
+PRICING = {
+    "draft_token_generated": 0.00005,  # $0.00005 per draft token
+    "draft_token_accepted": 0.00002,   # Bonus for accepted tokens
+    "target_token_verified": 0.0002,   # $0.0002 per verified token
+    "inference_base": 0.001,           # Base fee per inference
+}
+
 app = FastAPI(title="SpecNet Frontend Bridge")
+
+# ── Earnings Storage ──
+
+class EarningsTracker:
+    def __init__(self):
+        self.total_earnings = 0.0
+        self.daily_earnings = defaultdict(float)  # date -> earnings
+        self.hourly_activity = defaultdict(lambda: {"requests": 0, "tokens": 0, "earnings": 0.0})
+        self.payouts = []  # List of payout records
+        self.inference_history = []  # Recent inference records
+        self.total_tokens = 0  # Track total tokens drafted
+        self.total_acceptance_rate = 0.0  # Track cumulative acceptance rate for averaging
+
+    def record_inference(self,
+                        draft_tokens_generated: int,
+                        draft_tokens_accepted: int,
+                        target_tokens_verified: int,
+                        acceptance_rate: float):
+        """Record an inference and calculate earnings"""
+        # Calculate earnings
+        draft_earnings = (
+            draft_tokens_generated * PRICING["draft_token_generated"] +
+            draft_tokens_accepted * PRICING["draft_token_accepted"]
+        )
+        target_earnings = target_tokens_verified * PRICING["target_token_verified"]
+        total_inference_earnings = draft_earnings + target_earnings + PRICING["inference_base"]
+
+        # Update totals
+        self.total_earnings += total_inference_earnings
+        self.total_tokens += draft_tokens_generated
+        self.total_acceptance_rate += acceptance_rate
+
+        # Track by date
+        today = datetime.now().strftime("%Y-%m-%d")
+        self.daily_earnings[today] += total_inference_earnings
+
+        # Track by hour for activity chart
+        current_hour = datetime.now().strftime("%Y-%m-%d %H:00")
+        self.hourly_activity[current_hour]["requests"] += 1
+        self.hourly_activity[current_hour]["tokens"] += draft_tokens_generated + target_tokens_verified
+        self.hourly_activity[current_hour]["earnings"] += total_inference_earnings
+
+        # Store inference record
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "draft_tokens_generated": draft_tokens_generated,
+            "draft_tokens_accepted": draft_tokens_accepted,
+            "target_tokens_verified": target_tokens_verified,
+            "acceptance_rate": acceptance_rate,
+            "draft_earnings": round(draft_earnings, 6),
+            "target_earnings": round(target_earnings, 6),
+            "total_earnings": round(total_inference_earnings, 6),
+        }
+        self.inference_history.append(record)
+
+        # Keep only last 100 inferences
+        if len(self.inference_history) > 100:
+            self.inference_history = self.inference_history[-100:]
+
+        return record
+
+    def get_earnings_summary(self):
+        """Get overall earnings summary"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_earnings = self.daily_earnings.get(today, 0.0)
+
+        # Calculate percentage change (mock for now)
+        yesterday_earnings = 15.20  # Mock data
+        change_pct = ((today_earnings - yesterday_earnings) / yesterday_earnings * 100) if yesterday_earnings > 0 else 0
+
+        # Calculate average acceptance rate
+        num_inferences = len(self.inference_history)
+        avg_acceptance_rate = (self.total_acceptance_rate / num_inferences * 100) if num_inferences > 0 else 0
+
+        return {
+            "total_earnings": round(self.total_earnings, 2),
+            "today_earnings": round(today_earnings, 2),
+            "change_percentage": round(change_pct, 1),
+            "total_inferences": num_inferences,
+            "total_tokens": self.total_tokens,
+            "average_acceptance_rate": round(avg_acceptance_rate, 1),
+        }
+
+    def get_activity_data(self, hours: int = 24):
+        """Get activity data for the last N hours"""
+        activity_list = []
+        for hour_key in sorted(self.hourly_activity.keys())[-hours:]:
+            data = self.hourly_activity[hour_key]
+            # Parse the hour_key (format: "YYYY-MM-DD HH:00") and extract just the time
+            try:
+                time_str = hour_key.split()[1][:5]  # Get "HH:00"
+            except:
+                time_str = hour_key
+
+            activity_list.append({
+                "time": time_str,
+                "requests": data["requests"],
+                "tokens": data["tokens"],
+                "earnings": round(data["earnings"], 4),
+            })
+        return activity_list
+
+    def get_recent_payouts(self, limit: int = 10):
+        """Get recent payout records"""
+        # For now, generate mock payouts based on earnings
+        if not self.payouts and self.total_earnings > 0:
+            # Generate some mock historical payouts
+            from datetime import timedelta
+            base_date = datetime.now()
+
+            self.payouts = [
+                {
+                    "date": (base_date - timedelta(days=2)).strftime("%b %d, %Y"),
+                    "amount": round(self.total_earnings * 0.35, 2),
+                    "status": "Completed",
+                },
+                {
+                    "date": (base_date - timedelta(days=5)).strftime("%b %d, %Y"),
+                    "amount": round(self.total_earnings * 0.28, 2),
+                    "status": "Completed",
+                },
+                {
+                    "date": (base_date - timedelta(days=7)).strftime("%b %d, %Y"),
+                    "amount": round(self.total_earnings * 0.22, 2),
+                    "status": "Completed",
+                },
+            ]
+        return self.payouts[:limit]
+
+# Global earnings tracker instance
+earnings_tracker = EarningsTracker()
 
 app.add_middleware(
     CORSMiddleware,
@@ -245,6 +388,14 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
         speculation_rounds=speculation_rounds,
     )
 
+    # Record earnings for mock inference too
+    earnings_tracker.record_inference(
+        draft_tokens_generated=total_draft_generated,
+        draft_tokens_accepted=total_draft_accepted,
+        target_tokens_verified=total_draft_generated,
+        acceptance_rate=acceptance_rate,
+    )
+
     yield ("done", summary, [])
 
 # ── Real inference (delegated to DraftNodeClient + Modal target) ──
@@ -308,6 +459,16 @@ def run_real_inference(prompt: str, params: InferenceRequest):
         for t in result["tokens"]
     ]
 
+    # Debug: Count token types
+    type_counts = {"accepted": 0, "rejected": 0, "corrected": 0}
+    for t in result["tokens"]:
+        token_type = t.get("type", "accepted")
+        type_counts[token_type] = type_counts.get(token_type, 0) + 1
+
+    print(f"Token types in response: {type_counts}")
+    print(f"Acceptance rate: {result['acceptance_rate']:.1%}")
+    print(f"Draft generated: {result['draft_tokens_generated']}, accepted: {result['draft_tokens_accepted']}")
+
     round_event = RoundEvent(
         round_num=result["speculation_rounds"],
         drafted=result["draft_tokens_generated"],
@@ -329,6 +490,15 @@ def run_real_inference(prompt: str, params: InferenceRequest):
         acceptance_rate=result["acceptance_rate"],
         speculation_rounds=result["speculation_rounds"],
     )
+
+    # Record earnings for this inference
+    earnings_tracker.record_inference(
+        draft_tokens_generated=result["draft_tokens_generated"],
+        draft_tokens_accepted=result["draft_tokens_accepted"],
+        target_tokens_verified=result["draft_tokens_generated"],  # All drafted tokens get verified
+        acceptance_rate=result["acceptance_rate"],
+    )
+
     yield ("done", summary, [])
 
 # ── Dispatch to mock or real ──
@@ -456,6 +626,46 @@ def get_stats():
 def health():
     return {"status": "ok", "mock": MOCK_MODE}
 
+# ── Provider Earnings Endpoints ──
+
+@app.get("/api/provider/earnings")
+def get_provider_earnings():
+    """Get provider earnings summary"""
+    return earnings_tracker.get_earnings_summary()
+
+@app.get("/api/provider/activity")
+def get_provider_activity(hours: int = 24):
+    """Get provider activity data for charts"""
+    return {
+        "activity": earnings_tracker.get_activity_data(hours=hours),
+        "pricing": PRICING,
+    }
+
+@app.get("/api/provider/payouts")
+def get_provider_payouts(limit: int = 10):
+    """Get recent payout records"""
+    return {
+        "payouts": earnings_tracker.get_recent_payouts(limit=limit)
+    }
+
+@app.get("/api/provider/stats")
+def get_provider_stats():
+    """Get detailed provider statistics"""
+    summary = earnings_tracker.get_earnings_summary()
+    recent_inferences = earnings_tracker.inference_history[-10:] if earnings_tracker.inference_history else []
+
+    # Calculate average acceptance rate
+    if recent_inferences:
+        avg_acceptance = sum(inf["acceptance_rate"] for inf in recent_inferences) / len(recent_inferences)
+    else:
+        avg_acceptance = 0.0
+
+    return {
+        **summary,
+        "avg_acceptance_rate": round(avg_acceptance, 3),
+        "recent_inferences": recent_inferences,
+    }
+
 
 @app.post("/api/warmup")
 async def warmup():
@@ -466,8 +676,12 @@ async def warmup():
     if MOCK_MODE:
         return {"status": "ok", "mock": True, "warmed": False}
 
-    await asyncio.to_thread(_get_draft_client)
-    return {"status": "ok", "mock": False, "warmed": True}
+    try:
+        await asyncio.to_thread(_get_modal_draft_service)
+        return {"status": "ok", "mock": False, "warmed": True}
+    except Exception as e:
+        print(f"Warmup failed: {e}")
+        return {"status": "ok", "mock": False, "warmed": False, "error": str(e)}
 
 # ── Startup ──
 

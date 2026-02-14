@@ -5,8 +5,53 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Cpu, Info } from "lucide-react"
+import { useEffect, useState } from "react"
 
 export function ConnectedHardwareCard() {
+  const [stats, setStats] = useState({
+    total_tokens: 0,
+    total_inferences: 0,
+    average_acceptance_rate: 0,
+  })
+
+  useEffect(() => {
+    // Fetch stats on mount
+    fetch("http://localhost:8000/api/provider/earnings")
+      .then((res) => res.json())
+      .then((data) => {
+        setStats({
+          total_tokens: data.total_tokens || 0,
+          total_inferences: data.total_inferences || 0,
+          average_acceptance_rate: data.average_acceptance_rate || 0,
+        })
+      })
+      .catch((err) => console.error("Failed to fetch stats:", err))
+
+    // Poll for updates every 5 seconds
+    const interval = setInterval(() => {
+      fetch("http://localhost:8000/api/provider/earnings")
+        .then((res) => res.json())
+        .then((data) => {
+          setStats({
+            total_tokens: data.total_tokens || 0,
+            total_inferences: data.total_inferences || 0,
+            average_acceptance_rate: data.average_acceptance_rate || 0,
+          })
+        })
+        .catch((err) => console.error("Failed to fetch stats:", err))
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  function formatTokens(value: number) {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`
+    return String(value)
+  }
+
+  const acceptanceRate = Math.round(stats.average_acceptance_rate)
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
@@ -29,9 +74,9 @@ export function ConnectedHardwareCard() {
               </div>
               <div>
                 <p className="font-heading text-sm font-semibold text-foreground">
-                  Desktop-RTX-3060
+                  Modal-Draft-Node
                 </p>
-                <p className="text-xs text-muted-foreground">NVIDIA RTX 3060 12GB</p>
+                <p className="text-xs text-muted-foreground">Qwen 1.5B on A10G GPU</p>
               </div>
             </div>
             <Badge
@@ -51,13 +96,13 @@ export function ConnectedHardwareCard() {
             <div>
               <p className="text-xs text-muted-foreground">Total Tokens Drafted</p>
               <p className="mt-1 font-heading text-lg font-bold text-foreground">
-                4.2M
+                {formatTokens(stats.total_tokens)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Uptime</p>
+              <p className="text-xs text-muted-foreground">Total Inferences</p>
               <p className="mt-1 font-heading text-lg font-bold text-foreground">
-                99.2%
+                {stats.total_inferences}
               </p>
             </div>
           </div>
@@ -68,9 +113,11 @@ export function ConnectedHardwareCard() {
               <p className="font-heading text-sm font-medium text-foreground">
                 Draft Acceptance Rate
               </p>
-              <span className="font-mono text-sm font-bold text-foreground">78%</span>
+              <span className="font-mono text-sm font-bold text-foreground">
+                {acceptanceRate}%
+              </span>
             </div>
-            <Progress value={78} className="h-2.5" />
+            <Progress value={acceptanceRate} className="h-2.5" />
             <div className="flex items-start gap-1.5 rounded-md border border-border/30 bg-secondary/30 px-3 py-2">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <p className="text-[11px] leading-relaxed text-muted-foreground">
