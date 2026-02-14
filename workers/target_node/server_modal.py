@@ -30,13 +30,13 @@ image = (
 
 @app.cls(
     image=image,
-    gpu="A100",
+    gpu="H100",
     timeout=600,
     scaledown_window=300,
 )
 @modal.concurrent(max_inputs=10)
 class VerificationService:
-    model_name: str = "Qwen/Qwen2.5-3B-Instruct"
+    model_name: str = "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4"
     strategy: str = "deterministic"
 
     @modal.enter()

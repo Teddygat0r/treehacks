@@ -26,7 +26,7 @@ class Token:
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="Qwen/Qwen3-1.7B-Instruct",
+        draft_model="Qwen/Qwen2.5-0.5B-Instruct",
         num_draft_tokens=5,
         num_candidates=1,
         candidate_temperature=1.0,
@@ -43,11 +43,6 @@ class DraftNodeClient:
         self.num_candidates = num_candidates
         self.candidate_temperature = candidate_temperature
         self.candidate_top_p = candidate_top_p
-
-        # Adaptive N state
-        self._adaptive_window = []
-        self._adaptive_window_size = 5
-        self._current_n = num_candidates
 
         # Multi-candidate statistics
         self.candidate_win_counts = [0] * num_candidates
@@ -85,6 +80,11 @@ class DraftNodeClient:
         total_draft_accepted = 0
         speculation_rounds = 0
 
+        # Per-round timing arrays
+        timing_draft_ms = []
+        timing_verify_ms = []
+        timing_process_ms = []
+
         max_tokens = request.params.max_tokens if request.params.max_tokens > 0 else 16
         draft_tokens_per_round = request.params.draft_tokens if request.params.draft_tokens > 0 else self.num_draft_tokens
 
@@ -101,7 +101,7 @@ class DraftNodeClient:
         print(f"   Prompt: {request.prompt!r}")
         print(f"   Max tokens: {max_tokens}")
         print(f"   Draft tokens/round: {draft_tokens_per_round}")
-        print(f"   Num candidates: {self._current_n}")
+        print(f"   Num candidates: {self.num_candidates}")
         print(f"{'='*80}\n")
 
         while len(all_tokens) < max_tokens:
@@ -109,7 +109,7 @@ class DraftNodeClient:
 
             # Step 1: Generate draft tokens (possibly multiple candidates)
             num_to_draft = min(draft_tokens_per_round, max_tokens - len(all_tokens))
-            active_n = self._current_n
+            active_n = self.num_candidates
 
             draft_start = time.time()
 
@@ -184,7 +184,10 @@ class DraftNodeClient:
                 draft_text = self.tokenizer.decode(c['draft_token_ids'], skip_special_tokens=True)
                 print(f"    Candidate {ci}: {draft_text!r}")
 
+            timing_draft_ms.append(draft_time)
+
             # Step 2: Send to verification service
+            verify_start = time.time()
             try:
                 if active_n > 1:
                     # Multi-candidate verification
@@ -224,16 +227,6 @@ class DraftNodeClient:
                         "next_token_logprob": best_result["next_token_logprob"],
                     }
 
-                    # Adaptive N: reduce if acceptance consistently low
-                    best_rate = num_accepted / len(best_draft) if best_draft else 0.0
-                    self._adaptive_window.append(best_rate)
-                    if len(self._adaptive_window) >= self._adaptive_window_size:
-                        avg_rate = sum(self._adaptive_window[-self._adaptive_window_size:]) / self._adaptive_window_size
-                        if avg_rate < 0.2 and self._current_n > 1:
-                            self._current_n -= 1
-                            self._adaptive_window.clear()
-                            print(f"    [Adaptive] Reducing N to {self._current_n} (avg acceptance {avg_rate:.1%})")
-
                 else:
                     # Single candidate (original path)
                     draft_token_ids = candidates[0]['draft_token_ids']
@@ -253,6 +246,11 @@ class DraftNodeClient:
                     num_accepted = verify_result["num_accepted_tokens"]
                     total_draft_accepted += num_accepted
                     best_draft = draft_token_ids
+
+                verify_time = (time.time() - verify_start) * 1000
+                timing_verify_ms.append(verify_time)
+
+                process_start = time.time()
 
                 acceptance_rate_round = num_accepted / len(best_draft) if best_draft else 0.0
                 print(f"    Verified: {num_accepted}/{len(best_draft)} accepted ({acceptance_rate_round:.1%})")
@@ -308,10 +306,24 @@ class DraftNodeClient:
                     if eos_idx is not None:
                         current_token_ids = current_token_ids[:eos_idx + 1]
                     print(f"    EOS token reached, ending generation")
+
+                    process_time = (time.time() - process_start) * 1000
+                    timing_process_ms.append(process_time)
+
+                    round_total = draft_time + verify_time + process_time
+                    idle_pct = (verify_time / round_total * 100) if round_total > 0 else 0.0
+                    print(f"  Round {speculation_rounds} timing: draft={draft_time:.1f}ms  verify={verify_time:.1f}ms  process={process_time:.1f}ms  (idle={idle_pct:.1f}%)")
                     break
 
                 # Update current text
                 current_text = self.tokenizer.decode(current_token_ids, skip_special_tokens=True)
+
+                process_time = (time.time() - process_start) * 1000
+                timing_process_ms.append(process_time)
+
+                round_total = draft_time + verify_time + process_time
+                idle_pct = (verify_time / round_total * 100) if round_total > 0 else 0.0
+                print(f"  Round {speculation_rounds} timing: draft={draft_time:.1f}ms  verify={verify_time:.1f}ms  process={process_time:.1f}ms  (idle={idle_pct:.1f}%)")
 
             except Exception as e:
                 print(f"Error during verification: {e}")
@@ -331,11 +343,32 @@ class DraftNodeClient:
         print(f"   Draft accepted: {total_draft_accepted} ({acceptance_rate:.1%})")
         print(f"   Speculation rounds: {speculation_rounds}")
         if self.num_candidates > 1:
-            print(f"   Num candidates: {self.num_candidates} (adaptive N: {self._current_n})")
+            print(f"   Num candidates: {self.num_candidates}")
             print(f"   Candidate wins: {self.candidate_win_counts}")
         print(f"   Total time: {elapsed:.1f}ms ({len(all_tokens) / (elapsed/1000):.1f} tokens/sec)")
         print(f"   Result: {final_text!r}")
+
+        # Timing breakdown
+        total_draft_time = sum(timing_draft_ms)
+        total_verify_time = sum(timing_verify_ms)
+        total_process_time = sum(timing_process_ms)
+        num_rounds = len(timing_draft_ms)
+        total_tracked = total_draft_time + total_verify_time + total_process_time
+        idle_pct = (total_verify_time / total_tracked * 100) if total_tracked > 0 else 0.0
+
+        print(f"\nTiming breakdown:")
+        print(f"   Total draft generation: {total_draft_time:.1f}ms (avg {total_draft_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total draft generation: 0.0ms")
+        print(f"   Total verification wait: {total_verify_time:.1f}ms (avg {total_verify_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total verification wait: 0.0ms")
+        print(f"   Total processing: {total_process_time:.1f}ms (avg {total_process_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total processing: 0.0ms")
+        print(f"   Draft GPU idle: {idle_pct:.1f}% of wall time")
         print(f"{'='*80}\n")
+
+        # Store timing data for benchmark access
+        self._last_timing = {
+            'timing_draft_ms': timing_draft_ms,
+            'timing_verify_ms': timing_verify_ms,
+            'timing_process_ms': timing_process_ms,
+        }
 
         response = speculative_decoding_pb2.InferenceJobResponse(
             request_id=request.request_id,
@@ -387,7 +420,7 @@ def main():
                 top_k=50,
                 draft_tokens=5,
             ),
-            model_id="Qwen/Qwen3-1.7B-Instruct",
+            model_id="Qwen/Qwen2.5-0.5B-Instruct",
             timestamp=int(time.time() * 1000),
         )
 

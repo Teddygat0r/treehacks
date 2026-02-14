@@ -271,6 +271,9 @@ def run_benchmark(
                 'expected_answer': item['answer'],
                 'generated_text': response.generated_text,
             }
+        # Grab per-round timing data from the client
+        timing_data = getattr(client, '_last_timing', {})
+
         result.update({
             'total_tokens': response.total_tokens,
             'draft_generated': response.draft_tokens_generated,
@@ -280,6 +283,9 @@ def run_benchmark(
             'generation_time_ms': response.generation_time_ms,
             'wall_time_seconds': elapsed,
             'tokens_per_sec': response.total_tokens / (response.generation_time_ms / 1000) if response.generation_time_ms > 0 else 0,
+            'timing_draft_ms': timing_data.get('timing_draft_ms', []),
+            'timing_verify_ms': timing_data.get('timing_verify_ms', []),
+            'timing_process_ms': timing_data.get('timing_process_ms', []),
         })
         results.append(result)
 
