@@ -6,9 +6,14 @@ import grpc
 from concurrent import futures
 import sys
 import os
-from vllm import LLM, SamplingParams
+import socket
+import threading
 import time
+import uuid
+
+import requests
 import torch
+from vllm import LLM, SamplingParams
 
 # Add proto directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
@@ -20,6 +25,26 @@ import speculative_decoding_pb2_grpc
 
 # Import verification strategies
 from verification_strategies import get_strategy
+
+# Hard-coded router IP as requested.
+ROUTER_HTTP_BASE = "http://127.0.0.1:8001"
+
+
+def _router_post(path: str, payload: dict) -> dict | None:
+    try:
+        response = requests.post(f"{ROUTER_HTTP_BASE}{path}", json=payload, timeout=2.0)
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        print(f"Router request failed ({path}): {exc}")
+        return None
+
+
+def _resolve_local_ip() -> str:
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except Exception:
+        return "127.0.0.1"
 
 
 class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceServicer):
@@ -205,6 +230,9 @@ def serve(
     max_model_len=1024,
     max_num_seqs=2,
     enforce_eager=True,
+    worker_id=None,
+    worker_address=None,
+    register_with_router=True,
 ):
     """Start the verification service gRPC server"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
@@ -222,6 +250,51 @@ def serve(
     server.add_insecure_port(f'[::]:{port}')
     server.start()
 
+    worker_id = worker_id or f"target-{uuid.uuid4().hex[:8]}"
+    worker_address = worker_address or f"{_resolve_local_ip()}:{port}"
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = None
+
+    if register_with_router:
+        register_payload = {
+            "worker_id": worker_id,
+            "address": worker_address,
+            "model_id": model_name,
+            "model_name": model_name,
+            "version": "",
+            "gpu_model": "",
+            "gpu_memory_bytes": 0,
+            "gpu_count": 1,
+            "max_concurrent_requests": 32,
+            "max_batch_size": 16,
+        }
+        register_response = _router_post("/register/target-node", register_payload)
+        if register_response and register_response.get("accepted"):
+            print(
+                f"Registered target node with router: id={worker_id}, "
+                f"address={worker_address}, model={model_name}"
+            )
+
+            def _heartbeat_loop():
+                interval_s = 10.0
+                while not heartbeat_stop.wait(interval_s):
+                    response = _router_post(
+                        "/heartbeat/target-node",
+                        {
+                            "worker_id": worker_id,
+                            "active_requests": 0,
+                        },
+                    )
+                    if response and response.get("next_heartbeat_interval_ms"):
+                        interval_s = max(1.0, response["next_heartbeat_interval_ms"] / 1000.0)
+
+            heartbeat_thread = threading.Thread(
+                target=_heartbeat_loop,
+                name="target-router-heartbeat",
+                daemon=True,
+            )
+            heartbeat_thread.start()
+
     print(f"\n{'='*80}")
     print(f"🎯 Verification Service (Target Node) started on port {port}")
     print(f"   Model: {model_name}")
@@ -230,6 +303,9 @@ def serve(
     print(f"   max_model_len: {max_model_len}")
     print(f"   max_num_seqs: {max_num_seqs}")
     print(f"   enforce_eager: {enforce_eager}")
+    print(f"   worker_id: {worker_id}")
+    print(f"   worker_address: {worker_address}")
+    print(f"   router: {ROUTER_HTTP_BASE if register_with_router else 'disabled'}")
     if strategy_kwargs:
         print(f"   Strategy params: {strategy_kwargs}")
     print(f"   Ready to verify draft tokens from draft nodes")
@@ -240,6 +316,10 @@ def serve(
     except KeyboardInterrupt:
         print("\n\nShutting down verification service...")
         server.stop(0)
+    finally:
+        heartbeat_stop.set()
+        if heartbeat_thread and heartbeat_thread.is_alive():
+            heartbeat_thread.join(timeout=1.0)
 
 
 if __name__ == '__main__':
@@ -264,6 +344,12 @@ if __name__ == '__main__':
                         help='Maximum concurrent sequences (default: 2)')
     parser.add_argument('--no-enforce-eager', action='store_true',
                         help='Disable enforce_eager (may use more memory)')
+    parser.add_argument('--worker-id', type=str, default=None,
+                        help='Optional worker ID for router registration')
+    parser.add_argument('--worker-address', type=str, default=None,
+                        help='Address to register with router (default: local IP:port)')
+    parser.add_argument('--no-register', action='store_true',
+                        help='Disable router registration on startup')
 
     args = parser.parse_args()
 
@@ -281,4 +367,7 @@ if __name__ == '__main__':
         max_model_len=args.max_model_len,
         max_num_seqs=args.max_num_seqs,
         enforce_eager=not args.no_enforce_eager,
+        worker_id=args.worker_id,
+        worker_address=args.worker_address,
+        register_with_router=not args.no_register,
     )

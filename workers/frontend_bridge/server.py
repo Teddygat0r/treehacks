@@ -1,34 +1,54 @@
 """
-Frontend Bridge - FastAPI server bridging Next.js frontend to Modal backend.
-Translates HTTP/WebSocket requests into calls to draft/target nodes.
+Frontend Bridge - FastAPI server bridging Next.js frontend to distributed nodes.
 
-Run with --mock to simulate speculative decoding without vLLM/GPU:
-    python workers/frontend_bridge/server.py --mock
+- Frontend asks router for a draft node
+- Bridge calls that draft node over gRPC
+- Draft node handles speculative decoding against routed target nodes
 """
+import argparse
 import asyncio
 import json
+import os
 import random
+import sys
 import time
 import uuid
-import sys
-import os
-import argparse
 
+import grpc
+import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+
+PROTO_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "proto",
+)
+if PROTO_DIR not in sys.path:
+    sys.path.insert(0, PROTO_DIR)
+
+import common_pb2
+import speculative_decoding_pb2
+import speculative_decoding_pb2_grpc
+
+
 # ── Configuration ──
 
-DRAFT_MODEL = os.getenv("DRAFT_MODEL", "Qwen/Qwen2.5-1.5B-Instruct")
-MODAL_APP_NAME = os.getenv("MODAL_APP_NAME", "treehacks-verification-service")
-MODAL_CLASS_NAME = os.getenv("MODAL_CLASS_NAME", "VerificationService")
+# Hard-coded router IP as requested.
+ROUTER_HTTP_BASE = "http://127.0.0.1:8001"
+
+DRAFT_MODEL_ID = os.getenv("DRAFT_MODEL_ID", "Qwen/Qwen3-4B-Instruct")
+TARGET_MODEL_ID = os.getenv("TARGET_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 MOCK_MODE = os.getenv("MOCK_MODE", "").lower() in ("1", "true", "yes")
 TOKEN_SEND_BATCH_SIZE = max(1, int(os.getenv("TOKEN_SEND_BATCH_SIZE", "1")))
 DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "512"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 PROMPT_FORMAT = os.getenv("PROMPT_FORMAT", "chatml").lower()
+
+FRONTEND_CLIENT_ID = os.getenv("FRONTEND_CLIENT_ID", f"frontend-{uuid.uuid4().hex[:8]}")
+FRONTEND_CLIENT_ADDRESS = os.getenv("FRONTEND_CLIENT_ADDRESS", f"127.0.0.1:{BRIDGE_PORT}")
 
 app = FastAPI(title="SpecNet Frontend Bridge")
 
@@ -40,6 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ── Pydantic models ──
 
 class InferenceRequest(BaseModel):
@@ -49,11 +70,13 @@ class InferenceRequest(BaseModel):
     top_k: int = Field(default=50, ge=-1)
     draft_tokens: int = Field(default=5, ge=1, le=20)
 
+
 class TokenEvent(BaseModel):
     text: str
     type: str  # "accepted" | "rejected" | "corrected"
     token_id: int = 0
     logprob: float = 0.0
+
 
 class RoundEvent(BaseModel):
     round_num: int
@@ -62,6 +85,7 @@ class RoundEvent(BaseModel):
     corrected: int
     verification_time_ms: float
     acceptance_rate: float
+
 
 class InferenceResponse(BaseModel):
     request_id: str
@@ -74,6 +98,7 @@ class InferenceResponse(BaseModel):
     acceptance_rate: float
     speculation_rounds: int
 
+
 class NodeInfo(BaseModel):
     id: str
     type: str  # "draft" | "target"
@@ -84,6 +109,7 @@ class NodeInfo(BaseModel):
     price: float = 0.0
     gpu_memory: str = ""
 
+
 class NetworkStats(BaseModel):
     active_draft_nodes: int
     active_target_nodes: int
@@ -92,8 +118,75 @@ class NetworkStats(BaseModel):
     avg_cost_per_1k: float
 
 
+_registered_with_router = False
+_draft_channels: dict[str, grpc.Channel] = {}
+_draft_stubs: dict[str, speculative_decoding_pb2_grpc.DraftNodeServiceStub] = {}
+
+
+def _router_post(path: str, payload: dict) -> dict | None:
+    try:
+        response = requests.post(f"{ROUTER_HTTP_BASE}{path}", json=payload, timeout=2.0)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
+
+
+def _router_get(path: str) -> dict | None:
+    try:
+        response = requests.get(f"{ROUTER_HTTP_BASE}{path}", timeout=2.0)
+        response.raise_for_status()
+        return response.json()
+    except Exception:
+        return None
+
+
+def _register_frontend_client() -> None:
+    global _registered_with_router
+    if _registered_with_router:
+        return
+
+    response = _router_post(
+        "/register/client",
+        {
+            "client_id": FRONTEND_CLIENT_ID,
+            "address": FRONTEND_CLIENT_ADDRESS,
+            "metadata": "frontend-bridge",
+        },
+    )
+    _registered_with_router = bool(response and response.get("accepted"))
+
+
+def _route_to_draft_node(request_id: str, prompt: str) -> dict:
+    _register_frontend_client()
+
+    response = _router_post(
+        "/route/draft-node",
+        {
+            "request_id": request_id,
+            "prompt": prompt,
+            "model_id": DRAFT_MODEL_ID,
+            "priority": 0,
+            "client_id": FRONTEND_CLIENT_ID,
+            "client_address": FRONTEND_CLIENT_ADDRESS,
+        },
+    )
+    if not response or response.get("status") != "success":
+        raise RuntimeError("Router failed to assign a draft node")
+    if not response.get("assigned_draft_node_address"):
+        raise RuntimeError("Router returned draft node without address")
+    return response
+
+
+def _get_draft_stub(address: str) -> speculative_decoding_pb2_grpc.DraftNodeServiceStub:
+    if address not in _draft_stubs:
+        channel = grpc.insecure_channel(address)
+        _draft_channels[address] = channel
+        _draft_stubs[address] = speculative_decoding_pb2_grpc.DraftNodeServiceStub(channel)
+    return _draft_stubs[address]
+
+
 def _build_model_prompt(user_prompt: str) -> str:
-    """Build a model prompt with a global system message."""
     system_prompt = SYSTEM_PROMPT.strip()
     if not system_prompt:
         return user_prompt
@@ -101,16 +194,15 @@ def _build_model_prompt(user_prompt: str) -> str:
     if PROMPT_FORMAT == "plain":
         return f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
 
-    # ChatML format works well for Qwen instruct models.
     return (
         f"<|im_start|>system\n{system_prompt}\n<|im_end|>\n"
         f"<|im_start|>user\n{user_prompt}\n<|im_end|>\n"
         f"<|im_start|>assistant\n"
     )
 
+
 # ── Mock inference (no GPU required) ──
 
-# Word bank for generating plausible mock responses
 MOCK_RESPONSES = {
     "default": (
         "The concept you're asking about is quite fascinating. It involves multiple layers of "
@@ -141,6 +233,7 @@ MOCK_RESPONSES = {
     ),
 }
 
+
 def _pick_mock_response(prompt: str) -> str:
     prompt_lower = prompt.lower()
     for key, response in MOCK_RESPONSES.items():
@@ -148,11 +241,8 @@ def _pick_mock_response(prompt: str) -> str:
             return response
     return MOCK_RESPONSES["default"]
 
+
 def run_mock_inference(prompt: str, params: InferenceRequest):
-    """
-    Simulate speculative decoding with realistic timing and token events.
-    No GPU, vLLM, or gRPC required.
-    """
     request_id = str(uuid.uuid4())[:8]
     response_text = _pick_mock_response(prompt)
     words = response_text.split(" ")
@@ -172,7 +262,6 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
         round_accepted = 0
         round_corrected = 0
 
-        # Simulate a draft round of N tokens
         draft_count = min(params.draft_tokens, len(words) - i, params.max_tokens - output_token_count)
 
         for j in range(draft_count):
@@ -182,7 +271,6 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
             round_drafted += 1
             total_draft_generated += 1
 
-            # ~80% acceptance rate, ~15% rejected+corrected, ~5% just accepted anyway
             roll = random.random()
             if roll < 0.80:
                 round_token_events.append(TokenEvent(text=text, type="accepted", logprob=-0.1))
@@ -190,30 +278,32 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
                 total_draft_accepted += 1
                 output_token_count += 1
             else:
-                # Rejected token, then a corrected replacement
                 round_token_events.append(TokenEvent(text=text, type="rejected", logprob=-2.5))
-
-                # Pick a plausible correction (synonym-ish)
                 corrections = {
-                    "fundamentally": "profoundly", "changed": "transformed",
-                    "shows": "demonstrates", "famous": "well-known",
-                    "explains": "describes", "significant": "notable",
-                    "vast": "enormous", "dramatic": "remarkable",
-                    "evolved": "progressed", "modern": "contemporary",
+                    "fundamentally": "profoundly",
+                    "changed": "transformed",
+                    "shows": "demonstrates",
+                    "famous": "well-known",
+                    "explains": "describes",
+                    "significant": "notable",
+                    "vast": "enormous",
+                    "dramatic": "remarkable",
+                    "evolved": "progressed",
+                    "modern": "contemporary",
                 }
                 corrected_word = corrections.get(word, word + "s" if not word.endswith("s") else word[:-1])
                 round_corrected += 1
                 total_draft_generated += 1
                 total_draft_accepted += 1
-                round_token_events.append(TokenEvent(text=prefix + corrected_word, type="corrected", logprob=-0.3))
+                round_token_events.append(
+                    TokenEvent(text=prefix + corrected_word, type="corrected", logprob=-0.3)
+                )
                 output_token_count += 1
-                break  # After a rejection, the round ends
+                break
 
         i += draft_count if round_corrected == 0 else (j + 1)  # noqa: F821
 
         all_token_events.extend(round_token_events)
-
-        # Simulate verification latency
         verify_time = random.uniform(5, 25)
         rate = round_accepted / round_drafted if round_drafted > 0 else 0.0
 
@@ -225,10 +315,7 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
             verification_time_ms=verify_time,
             acceptance_rate=rate,
         )
-
         yield ("round", round_event, round_token_events)
-
-        # Small delay to simulate real timing
         time.sleep(random.uniform(0.03, 0.08))
 
     elapsed = (time.time() - start_time) * 1000
@@ -236,7 +323,6 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
     generated_text = " ".join(
         te.text.strip() for te in all_token_events if te.type in ("accepted", "corrected")
     )
-
     summary = InferenceResponse(
         request_id=request_id,
         generated_text=generated_text,
@@ -248,34 +334,19 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
         acceptance_rate=acceptance_rate,
         speculation_rounds=speculation_rounds,
     )
-
     yield ("done", summary, [])
 
-# ── Real inference (delegated to DraftNodeClient + Modal target) ──
 
-def _get_draft_client():
-    if not hasattr(_get_draft_client, "_client"):
-        from workers.draft_node.client import DraftNodeClient
-        _get_draft_client._client = DraftNodeClient(
-            draft_model=DRAFT_MODEL,
-            num_draft_tokens=5,
-            modal_app_name=MODAL_APP_NAME,
-            modal_class_name=MODAL_CLASS_NAME,
-        )
-    return _get_draft_client._client
-
+# ── Real inference (delegated to remote draft node) ──
 
 def run_real_inference(prompt: str, params: InferenceRequest):
-    """
-    Run speculative decoding through DraftNodeClient.
-    Yields (event_type, data, tokens) tuples.
-    """
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "proto"))
-    import common_pb2
-    import speculative_decoding_pb2
-
     request_id = str(uuid.uuid4())[:8]
     model_prompt = _build_model_prompt(prompt)
+
+    route = _route_to_draft_node(request_id=request_id, prompt=model_prompt)
+    draft_address = route["assigned_draft_node_address"]
+    draft_id = route.get("assigned_draft_node_id", "unknown")
+    print(f"Router assigned draft node: {draft_id} ({draft_address})")
 
     request = speculative_decoding_pb2.InferenceJobRequest(
         request_id=request_id,
@@ -286,46 +357,75 @@ def run_real_inference(prompt: str, params: InferenceRequest):
             top_k=params.top_k,
             draft_tokens=params.draft_tokens,
         ),
-        model_id=DRAFT_MODEL,
+        # Draft node uses this model_id to route to a target node.
+        model_id=TARGET_MODEL_ID,
         timestamp=int(time.time() * 1000),
     )
 
-    client = _get_draft_client()
+    stub = _get_draft_stub(draft_address)
+    stream = stub.StreamInference(request)
+
+    round_num = 0
+    round_buffer: list[TokenEvent] = []
     final_response = None
 
-    for event_type, data, tokens in client.execute_inference_stream(request):
-        if event_type == "round":
-            round_event = RoundEvent(**data)
-            token_events = [
-                TokenEvent(
-                    text=t["text"],
-                    type=t["type"],
-                    token_id=t.get("token_id", 0),
-                    logprob=t.get("logprob", 0.0),
+    try:
+        for chunk in stream:
+            if chunk.is_final:
+                final_response = chunk.final_response
+                break
+
+            token_event = TokenEvent(
+                text=chunk.token.text,
+                type="accepted",
+                token_id=chunk.token.token_id,
+                logprob=chunk.token.logprob,
+            )
+            round_buffer.append(token_event)
+
+            if len(round_buffer) >= params.draft_tokens:
+                round_num += 1
+                round_event = RoundEvent(
+                    round_num=round_num,
+                    drafted=len(round_buffer),
+                    accepted=len(round_buffer),
+                    corrected=0,
+                    verification_time_ms=0.0,
+                    acceptance_rate=1.0,
                 )
-                for t in tokens
-            ]
-            yield ("round", round_event, token_events)
-        elif event_type == "done":
-            final_response = data
+                yield ("round", round_event, list(round_buffer))
+                round_buffer.clear()
+    except grpc.RpcError as exc:
+        raise RuntimeError(f"Draft node RPC failed: {exc.code()} {exc.details()}") from exc
+
+    if round_buffer:
+        round_num += 1
+        round_event = RoundEvent(
+            round_num=round_num,
+            drafted=len(round_buffer),
+            accepted=len(round_buffer),
+            corrected=0,
+            verification_time_ms=0.0,
+            acceptance_rate=1.0,
+        )
+        yield ("round", round_event, list(round_buffer))
 
     if final_response is None:
-        raise RuntimeError("DraftNodeClient did not produce a final inference response")
+        raise RuntimeError("Draft node stream ended without final response")
 
-    final_token_events = [
+    summary_tokens = [
         TokenEvent(
-            text=t.text,
+            text=token.text,
             type="accepted",
-            token_id=t.token_id,
-            logprob=t.logprob,
+            token_id=token.token_id,
+            logprob=token.logprob,
         )
-        for t in final_response.tokens
+        for token in final_response.tokens
     ]
-
     summary = InferenceResponse(
         request_id=final_response.request_id,
         generated_text=final_response.generated_text,
-        tokens=final_token_events,
+        tokens=summary_tokens,
         total_tokens=final_response.total_tokens,
         draft_tokens_generated=final_response.draft_tokens_generated,
         draft_tokens_accepted=final_response.draft_tokens_accepted,
@@ -335,7 +435,6 @@ def run_real_inference(prompt: str, params: InferenceRequest):
     )
     yield ("done", summary, [])
 
-# ── Dispatch to mock or real ──
 
 def run_inference(prompt: str, params: InferenceRequest):
     if MOCK_MODE:
@@ -343,28 +442,25 @@ def run_inference(prompt: str, params: InferenceRequest):
     else:
         yield from run_real_inference(prompt, params)
 
+
 # ── REST endpoints ──
+
+@app.on_event("startup")
+def on_startup():
+    _register_frontend_client()
+
 
 @app.post("/api/inference", response_model=InferenceResponse)
 def inference(req: InferenceRequest):
-    """Submit a prompt and get the full inference response."""
     result = None
     for event_type, data, _ in run_inference(req.prompt, req):
         if event_type == "done":
             result = data
     return result
 
+
 @app.websocket("/api/inference/stream")
 async def ws_stream_inference(websocket: WebSocket):
-    """
-    WebSocket endpoint for streaming inference.
-
-    Client sends: {"prompt": "...", "max_tokens": 64, ...}
-    Server sends:
-      - {"type": "token", "data": {"text": "...", "type": "accepted"}}
-      - {"type": "round", "data": {"round_num": 1, "accepted": 3, ...}}
-      - {"type": "done", "data": {"request_id": "...", ...}}
-    """
     await websocket.accept()
     try:
         raw = await websocket.receive_text()
@@ -377,10 +473,7 @@ async def ws_stream_inference(websocket: WebSocket):
             if not token_buffer:
                 return
             for token in token_buffer:
-                await websocket.send_text(json.dumps({
-                    "type": "token",
-                    "data": token.model_dump(),
-                }))
+                await websocket.send_text(json.dumps({"type": "token", "data": token.model_dump()}))
             token_buffer = []
 
         gen = run_inference(params.prompt, params)
@@ -396,38 +489,68 @@ async def ws_stream_inference(websocket: WebSocket):
                     if len(token_buffer) >= TOKEN_SEND_BATCH_SIZE:
                         await flush_tokens()
                 await flush_tokens()
-                await websocket.send_text(json.dumps({
-                    "type": "round",
-                    "data": data.model_dump(),
-                }))
+                await websocket.send_text(json.dumps({"type": "round", "data": data.model_dump()}))
             elif event_type == "done":
                 await flush_tokens()
-                await websocket.send_text(json.dumps({
-                    "type": "done",
-                    "data": data.model_dump(),
-                }))
+                await websocket.send_text(json.dumps({"type": "done", "data": data.model_dump()}))
 
     except WebSocketDisconnect:
         pass
     except Exception as e:
         try:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "data": {"message": str(e)},
-            }))
-        except:
+            await websocket.send_text(json.dumps({"type": "error", "data": {"message": str(e)}}))
+        except Exception:
             pass
+
+
+def _format_memory(memory_bytes: int) -> str:
+    if memory_bytes <= 0:
+        return "N/A"
+    gib = memory_bytes / (1024 ** 3)
+    return f"{gib:.0f} GB"
+
 
 @app.get("/api/nodes", response_model=list[NodeInfo])
 def get_nodes():
-    """Return active nodes."""
-    mode = "mock" if MOCK_MODE else "live"
+    router_state = _router_get("/state")
+    if router_state:
+        nodes: list[NodeInfo] = []
+
+        for target in router_state.get("target_nodes", []):
+            nodes.append(
+                NodeInfo(
+                    id=target.get("worker_id", "target-unknown"),
+                    type="target",
+                    hardware=target.get("gpu_model") or "Target GPU",
+                    model=target.get("model_id") or target.get("model_name") or "unknown",
+                    status="online" if target.get("online") else "offline",
+                    latency=0.0,
+                    price=0.0,
+                    gpu_memory=_format_memory(int(target.get("gpu_memory_bytes", 0))),
+                )
+            )
+
+        for draft in router_state.get("draft_nodes", []):
+            nodes.append(
+                NodeInfo(
+                    id=draft.get("draft_node_id", "draft-unknown"),
+                    type="draft",
+                    hardware=draft.get("gpu_model") or ("Mock CPU" if MOCK_MODE else "Edge GPU"),
+                    model=draft.get("model_id") or draft.get("model_name") or DRAFT_MODEL_ID,
+                    status="online" if draft.get("online") else "offline",
+                    latency=0.0,
+                    price=0.0,
+                    gpu_memory=_format_memory(int(draft.get("gpu_memory_bytes", 0))),
+                )
+            )
+        return nodes
+
     return [
         NodeInfo(
             id="target-0",
             type="target",
             hardware="GPU Server",
-            model="Qwen/Qwen2.5-3B-Instruct",
+            model=TARGET_MODEL_ID,
             status="online",
             latency=12,
             price=2.49,
@@ -437,7 +560,7 @@ def get_nodes():
             id="draft-0",
             type="draft",
             hardware="Edge GPU" if not MOCK_MODE else "Mock CPU",
-            model=DRAFT_MODEL if not MOCK_MODE else "mock-model",
+            model=DRAFT_MODEL_ID if not MOCK_MODE else "mock-model",
             status="online",
             latency=45,
             price=0.05,
@@ -445,16 +568,27 @@ def get_nodes():
         ),
     ]
 
+
 @app.get("/api/stats", response_model=NetworkStats)
 def get_stats():
-    """Return network-wide statistics."""
+    router_stats = _router_get("/stats")
+    if router_stats:
+        return NetworkStats(
+            active_draft_nodes=int(router_stats.get("active_draft_nodes", 0)),
+            active_target_nodes=int(router_stats.get("active_target_nodes", 0)),
+            total_tps=145 if MOCK_MODE else 0.0,
+            avg_acceptance_rate=0.82 if MOCK_MODE else 0.0,
+            avg_cost_per_1k=0.0004,
+        )
+
     return NetworkStats(
         active_draft_nodes=1,
         active_target_nodes=1,
-        total_tps=145 if MOCK_MODE else 0,
+        total_tps=145 if MOCK_MODE else 0.0,
         avg_acceptance_rate=0.82 if MOCK_MODE else 0.0,
         avg_cost_per_1k=0.0004,
     )
+
 
 @app.get("/api/health")
 def health():
@@ -463,21 +597,15 @@ def health():
 
 @app.post("/api/warmup")
 async def warmup():
-    """
-    Warm up draft model/client so first prompt has low latency.
-    Triggered by frontend on page load.
-    """
     if MOCK_MODE:
         return {"status": "ok", "mock": True, "warmed": False}
-
-    await asyncio.to_thread(_get_draft_client)
+    _register_frontend_client()
     return {"status": "ok", "mock": False, "warmed": True}
 
-# ── Startup ──
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SpecNet Frontend Bridge")
-    parser.add_argument("--mock", action="store_true", help="Run in mock mode (no GPU/vLLM required)")
+    parser.add_argument("--mock", action="store_true", help="Run in mock mode (no GPU required)")
     parser.add_argument("--port", type=int, default=BRIDGE_PORT, help="Port to listen on")
     args = parser.parse_args()
 
@@ -485,16 +613,17 @@ if __name__ == "__main__":
         MOCK_MODE = True
 
     print(f"\n{'='*60}")
-    print(f"  SpecNet Frontend Bridge")
+    print("  SpecNet Frontend Bridge")
     print(f"  Port: {args.port}")
-    print(f"  Mode: {'MOCK (no GPU)' if MOCK_MODE else 'LIVE (vLLM + Modal)'}")
+    print(f"  Mode: {'MOCK' if MOCK_MODE else 'LIVE (router + draft gRPC)'}")
+    print(f"  Router: {ROUTER_HTTP_BASE}")
     if not MOCK_MODE:
-        print(f"  Modal app: {MODAL_APP_NAME}")
-        print(f"  Modal class: {MODAL_CLASS_NAME}")
-        print(f"  Draft model: {DRAFT_MODEL}")
+        print(f"  Draft model filter: {DRAFT_MODEL_ID}")
+        print(f"  Target model request: {TARGET_MODEL_ID}")
         print(f"  Prompt format: {PROMPT_FORMAT}")
         print(f"  System prompt enabled: {'yes' if SYSTEM_PROMPT.strip() else 'no'}")
     print(f"{'='*60}\n")
 
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=args.port)
