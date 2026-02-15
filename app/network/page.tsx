@@ -2,8 +2,8 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { NetworkExplorer } from "@/components/network-explorer"
 
 export const metadata = {
-  title: "Network Explorer - SpecNet",
-  description: "Live view of available Draft and Target nodes on the SpecNet distributed inference network.",
+  title: "Network - Nexus",
+  description: "Live view of available Draft and Target nodes on the Nexus distributed inference network.",
 }
 
 export default function NetworkPage() {

@@ -2,9 +2,9 @@ import { DashboardHeader } from "@/components/dashboard-header"
 import { ProviderDashboard } from "@/components/provider-dashboard"
 
 export const metadata = {
-  title: "Provider Dashboard - SpecNet",
+  title: "Earnings Dashboard - Nexus",
   description:
-    "Track your Draft Node earnings, acceptance rate, and recent payouts on the SpecNet network.",
+    "Track your Draft Node earnings, acceptance rate, and recent payouts on the Nexus network.",
 }
 
 export default function ProviderPage() {

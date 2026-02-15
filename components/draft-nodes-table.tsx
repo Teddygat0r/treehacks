@@ -8,20 +8,30 @@ import { Cpu, ChevronDown } from "lucide-react"
 import type { NodeInfo } from "@/lib/types"
 
 const DEFAULT_DRAFT_NODES = [
-  { id: "node_7x9b", hardware: "RTX 3060", latency: 45, price: 0.05 },
-  { id: "node_a2f1", hardware: "RTX 3070", latency: 32, price: 0.07 },
-  { id: "node_k4c8", hardware: "Mac M2", latency: 58, price: 0.04 },
-  { id: "node_p1d3", hardware: "RTX 4060", latency: 28, price: 0.08 },
-  { id: "node_r8v2", hardware: "Mac M1 Pro", latency: 62, price: 0.03 },
-  { id: "node_m5e9", hardware: "RTX 3080", latency: 38, price: 0.06 },
-  { id: "node_q3w7", hardware: "RTX 3060", latency: 51, price: 0.04 },
-  { id: "node_t6y4", hardware: "Mac M3", latency: 40, price: 0.06 },
-  { id: "node_j9u1", hardware: "RTX 4070", latency: 25, price: 0.09 },
-  { id: "node_h2b5", hardware: "RX 7600", latency: 55, price: 0.03 },
+  { id: "node_j9u1", hardware: "RTX 4070", latency: 8, price: 0.35 },
+  { id: "node_p1d3", hardware: "RTX 4060", latency: 11, price: 0.25 },
+  { id: "node_t6y4", hardware: "Mac M3", latency: 12, price: 0.20 },
+  { id: "node_w4n6", hardware: "RTX 4090", latency: 6, price: 0.75 },
+  { id: "node_a2f1", hardware: "RTX 3070", latency: 14, price: 0.22 },
+  { id: "node_m5e9", hardware: "RTX 3080", latency: 13, price: 0.30 },
+  { id: "node_7x9b", hardware: "RTX 3060", latency: 18, price: 0.15 },
+  { id: "node_q3w7", hardware: "RTX 3060", latency: 21, price: 0.14 },
+  { id: "node_b8g3", hardware: "RTX 3070 Ti", latency: 13, price: 0.24 },
+  { id: "node_k4c8", hardware: "Mac M2", latency: 22, price: 0.12 },
+  { id: "node_r8v2", hardware: "Mac M1 Pro", latency: 26, price: 0.10 },
+  { id: "node_h2b5", hardware: "RX 7600", latency: 23, price: 0.13 },
+  { id: "node_v1x8", hardware: "RTX 4060 Ti", latency: 9, price: 0.30 },
+  { id: "node_c5z2", hardware: "Mac M3 Pro", latency: 10, price: 0.28 },
+  { id: "node_f7s4", hardware: "RX 7700 XT", latency: 17, price: 0.18 },
+  { id: "node_n3k9", hardware: "RTX 3090", latency: 11, price: 0.40 },
+  { id: "node_d6p1", hardware: "Mac M4", latency: 7, price: 0.35 },
+  { id: "node_g2r5", hardware: "Intel Arc A770", latency: 28, price: 0.08 },
+  { id: "node_l8w3", hardware: "RTX 4080", latency: 7, price: 0.55 },
+  { id: "node_s9m7", hardware: "RX 7800 XT", latency: 15, price: 0.20 },
 ]
 
-const HARDWARE_TYPES = ["All Hardware", "RTX 3060", "RTX 3070", "RTX 3080", "RTX 4060", "RTX 4070", "Mac M1 Pro", "Mac M2", "Mac M3", "RX 7600"]
-const LATENCY_OPTIONS = ["Any Latency", "< 30ms", "< 50ms", "< 75ms"]
+const HARDWARE_TYPES = ["All Hardware", "RTX 3060", "RTX 3070", "RTX 3070 Ti", "RTX 3080", "RTX 3090", "RTX 4060", "RTX 4060 Ti", "RTX 4070", "RTX 4080", "RTX 4090", "Mac M1 Pro", "Mac M2", "Mac M3", "Mac M3 Pro", "Mac M4", "RX 7600", "RX 7700 XT", "RX 7800 XT", "Intel Arc A770"]
+const LATENCY_OPTIONS = ["Any Latency", "< 10ms", "< 15ms", "< 25ms"]
 
 interface DraftNodesTableProps {
   nodes?: NodeInfo[]
@@ -39,6 +49,7 @@ function PulsingDot() {
 export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
   const [hardwareFilter, setHardwareFilter] = useState("All Hardware")
   const [latencyFilter, setLatencyFilter] = useState("Any Latency")
+  const [selectedNode, setSelectedNode] = useState<string | null>(null)
 
   // Map live NodeInfo[] to the table format, or use defaults
   const DRAFT_NODES = useMemo(() => {
@@ -60,7 +71,7 @@ export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
       const max = parseInt(latencyFilter.replace(/[^0-9]/g, ""), 10)
       nodes = nodes.filter((n) => n.latency < max)
     }
-    return nodes
+    return nodes.sort((a, b) => a.latency - b.latency)
   }, [hardwareFilter, latencyFilter, DRAFT_NODES])
 
   return (
@@ -119,6 +130,7 @@ export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">Hardware</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">Latency</th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">Price/Hr</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground"></th>
                 </tr>
               </thead>
               <tbody>
@@ -137,9 +149,9 @@ export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
                     <td className="px-3 py-2.5 text-right">
                       <span
                         className={`font-mono ${
-                          node.latency < 35
+                          node.latency < 10
                             ? "text-primary"
-                            : node.latency < 55
+                            : node.latency < 20
                               ? "text-yellow-400"
                               : "text-orange-400"
                         }`}
@@ -150,11 +162,23 @@ export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
                     <td className="px-3 py-2.5 text-right font-mono text-foreground">
                       ${node.price.toFixed(2)}/hr
                     </td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={() => setSelectedNode(selectedNode === node.id ? null : node.id)}
+                        className={`rounded-md px-3 py-1 text-[10px] font-semibold transition-colors ${
+                          selectedNode === node.id
+                            ? "border border-green-500/40 bg-green-500/15 text-green-400"
+                            : "bg-primary text-primary-foreground hover:bg-primary/90"
+                        }`}
+                      >
+                        {selectedNode === node.id ? "Selected" : "Rent"}
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-3 py-6 text-center text-muted-foreground">
+                    <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
                       No nodes match the selected filters.
                     </td>
                   </tr>

@@ -30,7 +30,7 @@ export function ChatInput({ onSubmit, disabled }: ChatInputProps) {
             handleSubmit()
           }
         }}
-        placeholder="Ask SpecNet anything..."
+        placeholder="Ask Nexus anything..."
         disabled={disabled}
         className="flex-1 bg-transparent px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
         aria-label="Chat message input"

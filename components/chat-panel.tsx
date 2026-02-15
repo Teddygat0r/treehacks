@@ -88,7 +88,7 @@ export function ChatPanel({ prompt, tokens, done, counts }: ChatPanelProps) {
                 <Bot className="h-3.5 w-3.5 text-primary" />
               </div>
               <div className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="font-heading text-[11px] font-medium text-muted-foreground">SpecNet</span>
+                <span className="font-heading text-[11px] font-medium text-muted-foreground">Nexus</span>
                 <div className="rounded-lg bg-secondary/40 p-3">
                   <p className="font-mono text-sm leading-relaxed">
                     <AnimatePresence mode="popLayout">

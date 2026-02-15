@@ -97,16 +97,16 @@ function NodePanel({
       )}
       <div className="mb-3 flex items-center gap-2">
         <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg"
+          className="flex h-10 w-10 items-center justify-center rounded-lg"
           style={{ backgroundColor: `${color}20` }}
         >
-          <Icon className="h-4 w-4" style={{ color }} />
+          <Icon className="h-5 w-5" style={{ color }} />
         </div>
         <div>
-          <div className="font-heading text-xs font-bold" style={{ color }}>
+          <div className="font-heading text-sm font-bold" style={{ color }}>
             {label}
           </div>
-          <div className="font-mono text-[10px] text-muted-foreground">{sublabel}</div>
+          <div className="font-mono text-[11px] text-muted-foreground">{sublabel}</div>
         </div>
         {active && (
           <motion.div
@@ -265,13 +265,12 @@ function StatsBar({ rounds }: { rounds: RoundStats[] }) {
   const latest = rounds[rounds.length - 1]
   if (!latest) return null
 
-  const totalDrafted = rounds.reduce((s, r) => s + r.drafted, 0)
   const totalAccepted = rounds.reduce((s, r) => s + r.accepted, 0)
-  const overallRate = totalDrafted > 0 ? (totalAccepted / totalDrafted) * 100 : 0
+  const overallRate = (totalAccepted / (5 * latest.round_num)) * 100
 
   return (
     <motion.div
-      className="flex flex-wrap items-center justify-center gap-4 rounded-xl border border-border/50 bg-card/40 px-4 py-2 text-xs backdrop-blur-sm"
+      className="flex flex-wrap items-center justify-center gap-4 rounded-xl border border-border/50 bg-card/40 px-4 py-2 text-sm backdrop-blur-sm"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
     >
@@ -291,15 +290,13 @@ function StatsBar({ rounds }: { rounds: RoundStats[] }) {
       </div>
       <div className="h-3 w-px bg-border/50" />
       <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Rate</span>
-        <span className="font-mono font-bold text-yellow-400">{overallRate.toFixed(0)}%</span>
+        <span className="text-muted-foreground">Rejected</span>
+        <span className="font-mono font-bold text-red-400">{5 * latest.round_num - totalAccepted}</span>
       </div>
       <div className="h-3 w-px bg-border/50" />
       <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Verify</span>
-        <span className="font-mono font-bold text-blue-400">
-          {latest.verification_time_ms.toFixed(0)}ms
-        </span>
+        <span className="text-muted-foreground">Rate</span>
+        <span className="font-mono font-bold text-yellow-400">{overallRate.toFixed(0)}%</span>
       </div>
     </motion.div>
   )
@@ -322,7 +319,6 @@ export function SpeculativeVisualizer() {
   const [currentRound, setCurrentRound] = useState<RoundAnimState | null>(null)
   const [rounds, setRounds] = useState<RoundStats[]>([])
   const [resultTokens, setResultTokens] = useState<{ text: string; type: string }[]>([])
-  const [finalStats, setFinalStats] = useState<LogData["summary"] | null>(null)
 
   const cancelledRef = useRef(false)
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
@@ -335,7 +331,6 @@ export function SpeculativeVisualizer() {
     setCurrentRound(null)
     setRounds([])
     setResultTokens([])
-    setFinalStats(null)
   }, [])
 
   const schedule = useCallback((fn: () => void, delay: number) => {
@@ -380,6 +375,16 @@ export function SpeculativeVisualizer() {
         // Stage: verifying — show verdicts at target (all at once for accepted/rejected)
         schedule(() => {
           setCurrentRound({ roundNum: round.round_num, stage: "verifying", round })
+          setRounds((prev) => [
+            ...prev,
+            {
+              round_num: round.round_num,
+              drafted: chosenDraft.tokens.length,
+              accepted: chosenDraft.accepted_count,
+              verification_time_ms: round.verification_time_ms,
+              chosen_draft: round.chosen_draft,
+            },
+          ])
         }, globalDelay)
 
         globalDelay += VERIFY_PHASE
@@ -409,17 +414,6 @@ export function SpeculativeVisualizer() {
           if (round.correction) {
             setResultTokens((prev) => [...prev, { text: round.correction!.text, type: "corrected" }])
           }
-
-          setRounds((prev) => [
-            ...prev,
-            {
-              round_num: round.round_num,
-              drafted: chosenDraft.tokens.length * round.drafts.length,
-              accepted: chosenDraft.accepted_count + (round.correction ? 1 : 0),
-              verification_time_ms: round.verification_time_ms,
-              chosen_draft: round.chosen_draft,
-            },
-          ])
         }, globalDelay)
 
         globalDelay += ROUND_GAP
@@ -428,7 +422,6 @@ export function SpeculativeVisualizer() {
       // Complete
       schedule(() => {
         setCurrentRound(null)
-        setFinalStats(data.summary)
         setPhase("complete")
       }, globalDelay + 1000)
     }, 50)
@@ -453,7 +446,7 @@ export function SpeculativeVisualizer() {
           Speculative Decoding Visualizer
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Draft model generates 3 candidate sequences and target picks the longest match
+          Draft model generates 3 candidate sequences and target picks the best match
         </p>
       </div>
 
@@ -470,7 +463,7 @@ export function SpeculativeVisualizer() {
         {/* Draft node */}
         <NodePanel
           label="Draft Node"
-          sublabel="Qwen 1.5B · RTX 3060"
+          sublabel="Qwen3 1.5B · RTX 3060"
           icon={Cpu}
           active={!!isDraftActive}
           color={GREEN}
@@ -509,7 +502,7 @@ export function SpeculativeVisualizer() {
 
         {/* Connection lane */}
         <div className="relative flex flex-1 flex-col justify-center px-2">
-          <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] font-medium uppercase tracking-widest text-muted-foreground/50">
+          <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[11px] font-medium uppercase tracking-widest text-muted-foreground/50">
             Token Transfer
           </div>
 
@@ -517,8 +510,8 @@ export function SpeculativeVisualizer() {
           {[0, 1, 2].map((i) => (
             <div key={i} className="relative mb-3 flex items-center">
               {i === 0 && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-green-400/60">
-                  3 Draft Batches →
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[11px] text-green-400/60">
+                  Draft Batches →
                 </span>
               )}
               <motion.div
@@ -548,7 +541,7 @@ export function SpeculativeVisualizer() {
 
           {/* Return lane */}
           <div className="relative mt-1 flex items-center">
-            <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[9px] text-blue-400/60">
+            <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[11px] text-blue-400/60">
               ← Best Sequence
             </span>
             <div
@@ -569,7 +562,7 @@ export function SpeculativeVisualizer() {
         {/* Target node */}
         <NodePanel
           label="Target Node"
-          sublabel="Qwen 7B · H100"
+          sublabel="Qwen3 70B · H100"
           icon={Cloud}
           active={!!isTargetActive}
           color={YELLOW}
@@ -637,39 +630,6 @@ export function SpeculativeVisualizer() {
               />
             )}
           </p>
-        </motion.div>
-      )}
-
-      {/* Final stats */}
-      {phase === "complete" && finalStats && (
-        <motion.div
-          className="w-full max-w-3xl rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="mb-2 text-[10px] font-medium uppercase tracking-widest text-green-400">
-            Complete
-          </div>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="font-mono text-lg font-bold text-foreground">
-                {finalStats.total_tokens}
-              </div>
-              <div className="text-[10px] text-muted-foreground">Total Tokens</div>
-            </div>
-            <div>
-              <div className="font-mono text-lg font-bold text-green-400">
-                {(finalStats.acceptance_rate * 100).toFixed(0)}%
-              </div>
-              <div className="text-[10px] text-muted-foreground">Acceptance Rate</div>
-            </div>
-            <div>
-              <div className="font-mono text-lg font-bold text-blue-400">
-                {finalStats.speculation_rounds}
-              </div>
-              <div className="text-[10px] text-muted-foreground">Rounds</div>
-            </div>
-          </div>
         </motion.div>
       )}
 
