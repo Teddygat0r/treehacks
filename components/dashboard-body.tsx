@@ -7,8 +7,10 @@ import { ChatPanel, type VisibleToken } from "@/components/chat-panel"
 import { ChatInput } from "@/components/chat-input"
 import { LiveMetrics } from "@/components/live-metrics"
 import { PanelRightOpen, PanelRightClose } from "lucide-react"
-import { streamInference, warmupDraftModel } from "@/lib/api"
-import type { StreamMessage, TokenEvent } from "@/lib/types"
+import { warmupDraftModel } from "@/lib/api"
+import type { TokenEvent } from "@/lib/types"
+import { InferenceStore } from "@/lib/inference-store"
+import { InferenceService } from "@/lib/inference-service"
 
 const REJECTED_SHOW_DELAY = 80
 const STRIKE_PAUSE = 500
@@ -32,7 +34,7 @@ export function DashboardBody() {
   const [counts, setCounts] = useState({ accepted: 0, rejected: 0, corrected: 0, drafted: 0 })
   const [packets, setPackets] = useState<PacketEvent[]>([])
 
-  const [acceptanceRate, setAcceptanceRate] = useState(82)
+  const [acceptanceRate, setAcceptanceRate] = useState(0)
   const [totalInferenceTimeSavedMs, setTotalInferenceTimeSavedMs] = useState(0)
   const [costSavingsDollars, setCostSavingsDollars] = useState(0)
 
@@ -74,6 +76,10 @@ export function DashboardBody() {
 
     packetWordBuffer.current = { draft: 0, verify: 0 }
     acceptedDraftTokens.current = 0
+
+    // Persist to store
+    const store = InferenceStore.getInstance()
+    store.startInference(userPrompt)
 
     if (cleanupRef.current) cleanupRef.current()
 
@@ -148,56 +154,189 @@ export function DashboardBody() {
       setCostSavingsDollars(liveSavingsDollars)
     }
 
-    const cleanup = streamInference(
-      { prompt: userPrompt, max_tokens: 64 },
-      (msg: StreamMessage) => {
-        if (msg.type === "token") {
-          if (msg.data.type === "accepted") {
-            acceptedDraftTokens.current += 1
-            updateLiveSavingsFromAcceptedTokens()
-          }
-          tokenQueue.push(msg.data)
-          if (!processing) processTokenQueue()
-        } else if (msg.type === "round") {
-          setAcceptanceRate(msg.data.acceptance_rate * 100)
-        } else if (msg.type === "done") {
-          const data = msg.data
-          setAcceptanceRate(data.acceptance_rate * 100)
-          acceptedDraftTokens.current = data.draft_tokens_accepted
-          updateLiveSavingsFromAcceptedTokens()
+    // Use global inference service
+    const service = InferenceService.getInstance()
 
-          const checkDone = () => {
-            if (tokenQueue.length === 0 && !processing) {
-              setDone(true)
-              setPhase("complete")
-              setIsStreaming(false)
-            } else {
-              setTimeout(checkDone, 100)
-            }
-          }
-          checkDone()
-        } else if (msg.type === "error") {
+    const unsubToken = service.onToken((token: TokenEvent) => {
+      if (token.type === "accepted") {
+        acceptedDraftTokens.current += 1
+        updateLiveSavingsFromAcceptedTokens()
+      }
+      tokenQueue.push(token)
+      if (!processing) processTokenQueue()
+    })
+
+    const unsubRound = service.onRound((acceptanceRate: number) => {
+      setAcceptanceRate(acceptanceRate)
+    })
+
+    const unsubDone = service.onDone((data: any) => {
+      setAcceptanceRate(data.acceptance_rate * 100)
+      acceptedDraftTokens.current = data.draft_tokens_accepted
+      updateLiveSavingsFromAcceptedTokens()
+
+      const checkDone = () => {
+        if (tokenQueue.length === 0 && !processing) {
           setDone(true)
-          setPhase("idle")
+          setPhase("complete")
           setIsStreaming(false)
+        } else {
+          setTimeout(checkDone, 100)
         }
-      },
-      () => {
-        setDone(true)
-        setPhase("idle")
-        setIsStreaming(false)
-      },
-      () => {
-        setIsStreaming(false)
-      },
-    )
+      }
+      checkDone()
+    })
 
-    cleanupRef.current = cleanup
+    const unsubError = service.onError(() => {
+      setDone(true)
+      setPhase("idle")
+      setIsStreaming(false)
+    })
+
+    // Start the inference
+    service.startInference(userPrompt, 64)
+
+    // Cleanup function
+    cleanupRef.current = () => {
+      unsubToken()
+      unsubRound()
+      unsubDone()
+      unsubError()
+      // Don't stop the service - let it continue for other tabs
+    }
   }, [emitPacketForWords])
 
+  // Initialize from persisted state on mount and subscribe to ongoing inference
   useEffect(() => {
+    const store = InferenceStore.getInstance()
+    const service = InferenceService.getInstance()
+    const savedState = store.getState()
+
+    if (savedState && savedState.isActive && !savedState.done) {
+      // Restore the inference state
+      setPrompt(savedState.prompt)
+      setVisibleTokens(savedState.tokens)
+      setDone(savedState.done)
+      setCounts(savedState.counts)
+      setAcceptanceRate(savedState.acceptanceRate || 0)
+
+      // If service is still streaming, subscribe to new tokens
+      if (service.isActive()) {
+        setIsStreaming(true)
+
+        // Create token processing queue
+        const tokenQueue: TokenEvent[] = []
+        let processing = false
+
+        function processTokenQueue() {
+          if (tokenQueue.length === 0) {
+            processing = false
+            return
+          }
+          processing = true
+          const token = tokenQueue.shift()!
+
+          if (token.type === "accepted") {
+            setPhase("drafting")
+            emitPacketForWords("draft", "hsl(142, 71%, 45%)", token.text)
+            emitPacketForWords("verify", "hsl(217, 91%, 60%)", token.text)
+            setVisibleTokens((prev) => [...prev, { text: token.text, type: "accepted", phase: "settled" }])
+            setCounts((prev) => ({ ...prev, drafted: prev.drafted + 1, accepted: prev.accepted + 1 }))
+            setTimeout(processTokenQueue, STREAM_TOKEN_DELAY)
+          } else if (token.type === "rejected") {
+            setPhase("verifying")
+            emitPacketForWords("draft", "hsl(142, 71%, 45%)", token.text)
+            emitPacketForWords("verify", "hsl(48, 96%, 53%)", token.text)
+            setVisibleTokens((prev) => [...prev, { text: token.text, type: "rejected", phase: "appearing" }])
+            setCounts((prev) => ({ ...prev, drafted: prev.drafted + 1, rejected: prev.rejected + 1 }))
+
+            setTimeout(() => {
+              setVisibleTokens((prev) => {
+                const copy = [...prev]
+                const last = copy.findLastIndex((t) => t.type === "rejected" && t.phase === "appearing")
+                if (last >= 0) copy[last] = { ...copy[last], phase: "striking" }
+                return copy
+              })
+              setTimeout(() => {
+                setVisibleTokens((prev) => {
+                  const copy = [...prev]
+                  const last = copy.findLastIndex((t) => t.type === "rejected" && t.phase === "striking")
+                  if (last >= 0) copy[last] = { ...copy[last], phase: "hidden" }
+                  return copy
+                })
+                setTimeout(() => {
+                  setVisibleTokens((prev) => prev.filter((t) => t.phase !== "hidden"))
+                  processTokenQueue()
+                }, 100)
+              }, STRIKE_PAUSE)
+            }, REJECTED_SHOW_DELAY)
+          } else if (token.type === "corrected") {
+            setPhase("correcting")
+            emitPacketForWords("draft", "hsl(217, 91%, 60%)", token.text)
+            emitPacketForWords("verify", "hsl(217, 91%, 60%)", token.text)
+            setVisibleTokens((prev) => [...prev, { text: token.text, type: "corrected", phase: "appearing" }])
+            setCounts((prev) => ({ ...prev, drafted: prev.drafted + 1, corrected: prev.corrected + 1 }))
+
+            setTimeout(() => {
+              setVisibleTokens((prev) => {
+                const copy = [...prev]
+                copy[copy.length - 1] = { ...copy[copy.length - 1], phase: "settled" }
+                return copy
+              })
+              setTimeout(processTokenQueue, STREAM_TOKEN_DELAY)
+            }, 150)
+          }
+        }
+
+        // Subscribe to ongoing inference
+        const unsubToken = service.onToken((token: TokenEvent) => {
+          if (token.type === "accepted") {
+            acceptedDraftTokens.current += 1
+          }
+          tokenQueue.push(token)
+          if (!processing) processTokenQueue()
+        })
+
+        const unsubDone = service.onDone(() => {
+          setDone(true)
+          setPhase("complete")
+          setIsStreaming(false)
+        })
+
+        // Store cleanup
+        cleanupRef.current = () => {
+          unsubToken()
+          unsubDone()
+        }
+      }
+    }
+
     warmupDraftModel()
-  }, [])
+  }, [emitPacketForWords])
+
+  // Persist token updates to store
+  useEffect(() => {
+    if (prompt) {
+      const store = InferenceStore.getInstance()
+      store.updateTokens(visibleTokens)
+    }
+  }, [visibleTokens, prompt])
+
+  // Persist counts to store
+  useEffect(() => {
+    if (prompt) {
+      const store = InferenceStore.getInstance()
+      store.updateCounts(counts)
+    }
+  }, [counts, prompt])
+
+  // Persist completion state
+  useEffect(() => {
+    if (done && prompt) {
+      const store = InferenceStore.getInstance()
+      store.markDone(acceptanceRate)
+    }
+  }, [done, acceptanceRate, prompt])
 
   useEffect(() => {
     return () => {

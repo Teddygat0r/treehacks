@@ -21,9 +21,9 @@ interface LiveMetricsProps {
 }
 
 export function LiveMetrics({
-  acceptanceRate = 82,
-  totalInferenceTimeSavedMs = 320,
-  costSavingsDollars = 0.42,
+  acceptanceRate = 0,
+  totalInferenceTimeSavedMs = 0,
+  costSavingsDollars = 0,
 }: LiveMetricsProps) {
   const timeSavedBar = Math.min(100, Math.max(0, (totalInferenceTimeSavedMs / 1500) * 100))
   const costBar = Math.min(100, Math.max(0, (costSavingsDollars / 2) * 100))

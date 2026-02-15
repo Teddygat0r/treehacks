@@ -643,113 +643,99 @@ def get_nodes(include_demo: bool = False):
     # Add demo nodes if requested
     if include_demo:
         demo_nodes = [
-            # Demo Target nodes (verification) - High-end GPUs
-            NodeInfo(
-                id="demo-target-eu-central",
-                type="target",
-                hardware="NVIDIA A100 80GB",
-                model="Qwen/Qwen2.5-3B-Instruct",
-                status="online",
-                latency=18,
-                price=2.35,
-                gpu_memory="80 GB",
-                location={"lat": 52.5200, "lng": 13.4050, "city": "Berlin", "country": "Germany (Demo)"},
-                earnings=0.0,
-                uptime=99.5,
-            ),
-            NodeInfo(
-                id="demo-target-asia-east",
-                type="target",
-                hardware="NVIDIA A100 80GB",
-                model="Qwen/Qwen2.5-3B-Instruct",
-                status="busy",
-                latency=25,
-                price=2.29,
-                gpu_memory="80 GB",
-                location={"lat": 35.6762, "lng": 139.6503, "city": "Tokyo", "country": "Japan (Demo)"},
-                earnings=0.0,
-                uptime=99.2,
-            ),
+            # Demo Target nodes (verification) - High-end GPUs distributed globally
+            NodeInfo(id="demo-target-eu-central", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=18, price=2.35, gpu_memory="80 GB", location={"lat": 52.5200, "lng": 13.4050, "city": "Berlin", "country": "Germany"}, earnings=0.0, uptime=99.5),
+            NodeInfo(id="demo-target-asia-east", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=25, price=2.29, gpu_memory="80 GB", location={"lat": 35.6762, "lng": 139.6503, "city": "Tokyo", "country": "Japan"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-target-us-east", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=15, price=2.45, gpu_memory="80 GB", location={"lat": 40.7128, "lng": -74.0060, "city": "New York", "country": "USA"}, earnings=0.0, uptime=99.8),
+            NodeInfo(id="demo-target-india", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=28, price=2.20, gpu_memory="80 GB", location={"lat": 19.0760, "lng": 72.8777, "city": "Mumbai", "country": "India"}, earnings=0.0, uptime=98.9),
+            NodeInfo(id="demo-target-canada", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=14, price=2.38, gpu_memory="80 GB", location={"lat": 43.6532, "lng": -79.3832, "city": "Toronto", "country": "Canada"}, earnings=0.0, uptime=99.6),
+            NodeInfo(id="demo-target-oceania", type="target", hardware="NVIDIA A100 80GB", model="Qwen/Qwen2.5-3B-Instruct", status="online", latency=32, price=2.42, gpu_memory="80 GB", location={"lat": -33.8688, "lng": 151.2093, "city": "Sydney", "country": "Australia"}, earnings=0.0, uptime=99.1),
 
-            # Demo Draft nodes - Distributed edge compute
-            NodeInfo(
-                id="demo-draft-us-east",
-                type="draft",
-                hardware="NVIDIA A10G 24GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="online",
-                latency=8,
-                price=0.05,
-                gpu_memory="24 GB",
-                location={"lat": 40.7128, "lng": -74.0060, "city": "New York", "country": "USA (Demo)"},
-                earnings=0.0,
-                uptime=99.9,
-            ),
-            NodeInfo(
-                id="demo-draft-us-west",
-                type="draft",
-                hardware="NVIDIA A10G 24GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="online",
-                latency=10,
-                price=0.05,
-                gpu_memory="24 GB",
-                location={"lat": 47.6062, "lng": -122.3321, "city": "Seattle", "country": "USA (Demo)"},
-                earnings=0.0,
-                uptime=98.7,
-            ),
-            NodeInfo(
-                id="demo-draft-eu-west",
-                type="draft",
-                hardware="NVIDIA RTX 4090 24GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="online",
-                latency=15,
-                price=0.04,
-                gpu_memory="24 GB",
-                location={"lat": 51.5074, "lng": -0.1278, "city": "London", "country": "UK (Demo)"},
-                earnings=0.0,
-                uptime=97.5,
-            ),
-            NodeInfo(
-                id="demo-draft-asia-south",
-                type="draft",
-                hardware="NVIDIA RTX 3090 24GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="online",
-                latency=22,
-                price=0.03,
-                gpu_memory="24 GB",
-                location={"lat": 1.3521, "lng": 103.8198, "city": "Singapore", "country": "Singapore (Demo)"},
-                earnings=0.0,
-                uptime=96.8,
-            ),
-            NodeInfo(
-                id="demo-draft-oceania",
-                type="draft",
-                hardware="NVIDIA RTX 4080 16GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="offline",
-                latency=35,
-                price=0.04,
-                gpu_memory="16 GB",
-                location={"lat": -33.8688, "lng": 151.2093, "city": "Sydney", "country": "Australia (Demo)"},
-                earnings=0.0,
-                uptime=95.2,
-            ),
-            NodeInfo(
-                id="demo-draft-south-america",
-                type="draft",
-                hardware="NVIDIA RTX 3080 10GB",
-                model="Qwen/Qwen2.5-1.5B-Instruct",
-                status="online",
-                latency=28,
-                price=0.03,
-                gpu_memory="10 GB",
-                location={"lat": -23.5505, "lng": -46.6333, "city": "São Paulo", "country": "Brazil (Demo)"},
-                earnings=0.0,
-                uptime=94.1,
-            ),
+            # Demo Draft nodes - Distributed edge compute across all continents
+            NodeInfo(id="demo-draft-us-east", type="draft", hardware="NVIDIA A10G 24GB", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=8, price=0.05, gpu_memory="24 GB", location={"lat": 40.7128, "lng": -74.0060, "city": "New York", "country": "USA"}, earnings=0.0, uptime=99.9),
+            NodeInfo(id="demo-draft-us-central", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=9, price=0.04, gpu_memory="24 GB", location={"lat": 41.8781, "lng": -87.6298, "city": "Chicago", "country": "USA"}, earnings=0.0, uptime=99.7),
+            NodeInfo(id="demo-draft-us-west", type="draft", hardware="NVIDIA A10G 24GB", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=10, price=0.05, gpu_memory="24 GB", location={"lat": 47.6062, "lng": -122.3321, "city": "Seattle", "country": "USA"}, earnings=0.0, uptime=98.7),
+            NodeInfo(id="demo-draft-us-south", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=11, price=0.03, gpu_memory="24 GB", location={"lat": 30.2672, "lng": -97.7431, "city": "Austin", "country": "USA"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-canada-east", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=13, price=0.04, gpu_memory="16 GB", location={"lat": 45.5017, "lng": -73.5673, "city": "Montreal", "country": "Canada"}, earnings=0.0, uptime=99.4),
+            NodeInfo(id="demo-draft-canada-west", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=12, price=0.03, gpu_memory="10 GB", location={"lat": 49.2827, "lng": -123.1207, "city": "Vancouver", "country": "Canada"}, earnings=0.0, uptime=98.8),
+            NodeInfo(id="demo-draft-mexico", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=16, price=0.03, gpu_memory="8 GB", location={"lat": 19.4326, "lng": -99.1332, "city": "Mexico City", "country": "Mexico"}, earnings=0.0, uptime=97.9),
+            NodeInfo(id="demo-draft-brazil", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.03, gpu_memory="10 GB", location={"lat": -23.5505, "lng": -46.6333, "city": "São Paulo", "country": "Brazil"}, earnings=0.0, uptime=98.1),
+            NodeInfo(id="demo-draft-argentina", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=30, price=0.02, gpu_memory="12 GB", location={"lat": -34.6037, "lng": -58.3816, "city": "Buenos Aires", "country": "Argentina"}, earnings=0.0, uptime=97.5),
+            NodeInfo(id="demo-draft-uk", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=15, price=0.04, gpu_memory="24 GB", location={"lat": 51.5074, "lng": -0.1278, "city": "London", "country": "UK"}, earnings=0.0, uptime=99.5),
+            NodeInfo(id="demo-draft-france", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=17, price=0.03, gpu_memory="24 GB", location={"lat": 48.8566, "lng": 2.3522, "city": "Paris", "country": "France"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-draft-netherlands", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=16, price=0.04, gpu_memory="16 GB", location={"lat": 52.3702, "lng": 4.8952, "city": "Amsterdam", "country": "Netherlands"}, earnings=0.0, uptime=99.6),
+            NodeInfo(id="demo-draft-sweden", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=19, price=0.03, gpu_memory="10 GB", location={"lat": 59.3293, "lng": 18.0686, "city": "Stockholm", "country": "Sweden"}, earnings=0.0, uptime=99.1),
+            NodeInfo(id="demo-draft-spain", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=20, price=0.03, gpu_memory="8 GB", location={"lat": 40.4168, "lng": -3.7038, "city": "Madrid", "country": "Spain"}, earnings=0.0, uptime=98.4),
+            NodeInfo(id="demo-draft-singapore", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=22, price=0.03, gpu_memory="24 GB", location={"lat": 1.3521, "lng": 103.8198, "city": "Singapore", "country": "Singapore"}, earnings=0.0, uptime=99.8),
+            NodeInfo(id="demo-draft-hong-kong", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=24, price=0.04, gpu_memory="16 GB", location={"lat": 22.3193, "lng": 114.1694, "city": "Hong Kong", "country": "Hong Kong"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-seoul", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=26, price=0.04, gpu_memory="24 GB", location={"lat": 37.5665, "lng": 126.9780, "city": "Seoul", "country": "South Korea"}, earnings=0.0, uptime=99.7),
+            NodeInfo(id="demo-draft-bangkok", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=27, price=0.03, gpu_memory="10 GB", location={"lat": 13.7563, "lng": 100.5018, "city": "Bangkok", "country": "Thailand"}, earnings=0.0, uptime=98.6),
+            NodeInfo(id="demo-draft-dubai", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=25, price=0.03, gpu_memory="24 GB", location={"lat": 25.2048, "lng": 55.2708, "city": "Dubai", "country": "UAE"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-mumbai", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=29, price=0.03, gpu_memory="8 GB", location={"lat": 19.0760, "lng": 72.8777, "city": "Mumbai", "country": "India"}, earnings=0.0, uptime=98.2),
+            NodeInfo(id="demo-draft-bangalore", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.03, gpu_memory="10 GB", location={"lat": 12.9716, "lng": 77.5946, "city": "Bangalore", "country": "India"}, earnings=0.0, uptime=98.5),
+            NodeInfo(id="demo-draft-melbourne", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=33, price=0.04, gpu_memory="16 GB", location={"lat": -37.8136, "lng": 144.9631, "city": "Melbourne", "country": "Australia"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-auckland", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=36, price=0.03, gpu_memory="8 GB", location={"lat": -36.8485, "lng": 174.7633, "city": "Auckland", "country": "New Zealand"}, earnings=0.0, uptime=98.3),
+            NodeInfo(id="demo-draft-cape-town", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=38, price=0.02, gpu_memory="12 GB", location={"lat": -33.9249, "lng": 18.4241, "city": "Cape Town", "country": "South Africa"}, earnings=0.0, uptime=97.8),
+
+            # Additional dense network coverage
+            NodeInfo(id="demo-draft-portland", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=11, price=0.03, gpu_memory="10 GB", location={"lat": 45.5152, "lng": -122.6784, "city": "Portland", "country": "USA"}, earnings=0.0, uptime=98.9),
+            NodeInfo(id="demo-draft-denver", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=10, price=0.03, gpu_memory="8 GB", location={"lat": 39.7392, "lng": -104.9903, "city": "Denver", "country": "USA"}, earnings=0.0, uptime=99.1),
+            NodeInfo(id="demo-draft-miami", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=12, price=0.04, gpu_memory="16 GB", location={"lat": 25.7617, "lng": -80.1918, "city": "Miami", "country": "USA"}, earnings=0.0, uptime=98.6),
+            NodeInfo(id="demo-draft-atlanta", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=11, price=0.03, gpu_memory="24 GB", location={"lat": 33.7490, "lng": -84.3880, "city": "Atlanta", "country": "USA"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-draft-boston", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=9, price=0.04, gpu_memory="24 GB", location={"lat": 42.3601, "lng": -71.0589, "city": "Boston", "country": "USA"}, earnings=0.0, uptime=99.5),
+            NodeInfo(id="demo-draft-dallas", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=10, price=0.03, gpu_memory="10 GB", location={"lat": 32.7767, "lng": -96.7970, "city": "Dallas", "country": "USA"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-phoenix", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=11, price=0.03, gpu_memory="8 GB", location={"lat": 33.4484, "lng": -112.0740, "city": "Phoenix", "country": "USA"}, earnings=0.0, uptime=98.4),
+            NodeInfo(id="demo-draft-san-diego", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=12, price=0.03, gpu_memory="10 GB", location={"lat": 32.7157, "lng": -117.1611, "city": "San Diego", "country": "USA"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-las-vegas", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=13, price=0.03, gpu_memory="24 GB", location={"lat": 36.1699, "lng": -115.1398, "city": "Las Vegas", "country": "USA"}, earnings=0.0, uptime=98.7),
+            NodeInfo(id="demo-draft-minneapolis", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=11, price=0.02, gpu_memory="12 GB", location={"lat": 44.9778, "lng": -93.2650, "city": "Minneapolis", "country": "USA"}, earnings=0.0, uptime=99.1),
+
+            NodeInfo(id="demo-draft-santiago", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=31, price=0.03, gpu_memory="8 GB", location={"lat": -33.4489, "lng": -70.6693, "city": "Santiago", "country": "Chile"}, earnings=0.0, uptime=98.0),
+            NodeInfo(id="demo-draft-bogota", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=25, price=0.02, gpu_memory="12 GB", location={"lat": 4.7110, "lng": -74.0721, "city": "Bogotá", "country": "Colombia"}, earnings=0.0, uptime=97.6),
+            NodeInfo(id="demo-draft-lima", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=29, price=0.03, gpu_memory="8 GB", location={"lat": -12.0464, "lng": -77.0428, "city": "Lima", "country": "Peru"}, earnings=0.0, uptime=97.9),
+
+            NodeInfo(id="demo-draft-berlin", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=17, price=0.04, gpu_memory="24 GB", location={"lat": 52.5200, "lng": 13.4050, "city": "Berlin", "country": "Germany"}, earnings=0.0, uptime=99.4),
+            NodeInfo(id="demo-draft-munich", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=18, price=0.03, gpu_memory="10 GB", location={"lat": 48.1351, "lng": 11.5820, "city": "Munich", "country": "Germany"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-frankfurt", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=16, price=0.03, gpu_memory="24 GB", location={"lat": 50.1109, "lng": 8.6821, "city": "Frankfurt", "country": "Germany"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-rome", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=21, price=0.03, gpu_memory="8 GB", location={"lat": 41.9028, "lng": 12.4964, "city": "Rome", "country": "Italy"}, earnings=0.0, uptime=98.5),
+            NodeInfo(id="demo-draft-milan", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=20, price=0.04, gpu_memory="16 GB", location={"lat": 45.4642, "lng": 9.1900, "city": "Milan", "country": "Italy"}, earnings=0.0, uptime=99.1),
+            NodeInfo(id="demo-draft-zurich", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=17, price=0.04, gpu_memory="24 GB", location={"lat": 47.3769, "lng": 8.5417, "city": "Zurich", "country": "Switzerland"}, earnings=0.0, uptime=99.7),
+            NodeInfo(id="demo-draft-vienna", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=19, price=0.03, gpu_memory="10 GB", location={"lat": 48.2082, "lng": 16.3738, "city": "Vienna", "country": "Austria"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-warsaw", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=20, price=0.03, gpu_memory="8 GB", location={"lat": 52.2297, "lng": 21.0122, "city": "Warsaw", "country": "Poland"}, earnings=0.0, uptime=98.6),
+            NodeInfo(id="demo-draft-prague", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=19, price=0.03, gpu_memory="10 GB", location={"lat": 50.0755, "lng": 14.4378, "city": "Prague", "country": "Czech Republic"}, earnings=0.0, uptime=98.9),
+            NodeInfo(id="demo-draft-brussels", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=18, price=0.03, gpu_memory="8 GB", location={"lat": 50.8503, "lng": 4.3517, "city": "Brussels", "country": "Belgium"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-draft-copenhagen", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=19, price=0.04, gpu_memory="16 GB", location={"lat": 55.6761, "lng": 12.5683, "city": "Copenhagen", "country": "Denmark"}, earnings=0.0, uptime=99.4),
+            NodeInfo(id="demo-draft-oslo", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=20, price=0.03, gpu_memory="24 GB", location={"lat": 59.9139, "lng": 10.7522, "city": "Oslo", "country": "Norway"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-helsinki", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=21, price=0.03, gpu_memory="10 GB", location={"lat": 60.1699, "lng": 24.9384, "city": "Helsinki", "country": "Finland"}, earnings=0.0, uptime=99.1),
+            NodeInfo(id="demo-draft-dublin", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=17, price=0.03, gpu_memory="8 GB", location={"lat": 53.3498, "lng": -6.2603, "city": "Dublin", "country": "Ireland"}, earnings=0.0, uptime=98.8),
+
+            NodeInfo(id="demo-draft-tokyo-2", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=24, price=0.04, gpu_memory="24 GB", location={"lat": 35.6895, "lng": 139.6917, "city": "Tokyo", "country": "Japan"}, earnings=0.0, uptime=99.6),
+            NodeInfo(id="demo-draft-osaka", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=25, price=0.03, gpu_memory="24 GB", location={"lat": 34.6937, "lng": 135.5023, "city": "Osaka", "country": "Japan"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-draft-taipei", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=26, price=0.04, gpu_memory="16 GB", location={"lat": 25.0330, "lng": 121.5654, "city": "Taipei", "country": "Taiwan"}, earnings=0.0, uptime=99.4),
+            NodeInfo(id="demo-draft-shanghai", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=27, price=0.03, gpu_memory="24 GB", location={"lat": 31.2304, "lng": 121.4737, "city": "Shanghai", "country": "China"}, earnings=0.0, uptime=99.1),
+            NodeInfo(id="demo-draft-beijing", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.04, gpu_memory="24 GB", location={"lat": 39.9042, "lng": 116.4074, "city": "Beijing", "country": "China"}, earnings=0.0, uptime=99.3),
+            NodeInfo(id="demo-draft-shenzhen", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=26, price=0.03, gpu_memory="10 GB", location={"lat": 22.5431, "lng": 114.0579, "city": "Shenzhen", "country": "China"}, earnings=0.0, uptime=98.9),
+            NodeInfo(id="demo-draft-jakarta", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=29, price=0.03, gpu_memory="8 GB", location={"lat": -6.2088, "lng": 106.8456, "city": "Jakarta", "country": "Indonesia"}, earnings=0.0, uptime=98.3),
+            NodeInfo(id="demo-draft-manila", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.02, gpu_memory="12 GB", location={"lat": 14.5995, "lng": 120.9842, "city": "Manila", "country": "Philippines"}, earnings=0.0, uptime=98.1),
+            NodeInfo(id="demo-draft-kuala-lumpur", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=27, price=0.03, gpu_memory="10 GB", location={"lat": 3.1390, "lng": 101.6869, "city": "Kuala Lumpur", "country": "Malaysia"}, earnings=0.0, uptime=98.7),
+            NodeInfo(id="demo-draft-hanoi", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.03, gpu_memory="8 GB", location={"lat": 21.0285, "lng": 105.8542, "city": "Hanoi", "country": "Vietnam"}, earnings=0.0, uptime=98.4),
+
+            NodeInfo(id="demo-draft-sydney-2", type="draft", hardware="NVIDIA RTX 4090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=33, price=0.04, gpu_memory="24 GB", location={"lat": -33.8688, "lng": 151.2093, "city": "Sydney", "country": "Australia"}, earnings=0.0, uptime=99.2),
+            NodeInfo(id="demo-draft-brisbane", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=34, price=0.03, gpu_memory="10 GB", location={"lat": -27.4698, "lng": 153.0251, "city": "Brisbane", "country": "Australia"}, earnings=0.0, uptime=98.9),
+            NodeInfo(id="demo-draft-perth", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=35, price=0.03, gpu_memory="8 GB", location={"lat": -31.9505, "lng": 115.8605, "city": "Perth", "country": "Australia"}, earnings=0.0, uptime=98.5),
+
+            NodeInfo(id="demo-draft-delhi", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=29, price=0.04, gpu_memory="16 GB", location={"lat": 28.7041, "lng": 77.1025, "city": "Delhi", "country": "India"}, earnings=0.0, uptime=98.6),
+            NodeInfo(id="demo-draft-chennai", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=30, price=0.03, gpu_memory="8 GB", location={"lat": 13.0827, "lng": 80.2707, "city": "Chennai", "country": "India"}, earnings=0.0, uptime=98.3),
+            NodeInfo(id="demo-draft-hyderabad", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=29, price=0.03, gpu_memory="10 GB", location={"lat": 17.3850, "lng": 78.4867, "city": "Hyderabad", "country": "India"}, earnings=0.0, uptime=98.7),
+            NodeInfo(id="demo-draft-pune", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=28, price=0.02, gpu_memory="12 GB", location={"lat": 18.5204, "lng": 73.8567, "city": "Pune", "country": "India"}, earnings=0.0, uptime=98.4),
+
+            NodeInfo(id="demo-draft-cairo", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=35, price=0.03, gpu_memory="8 GB", location={"lat": 30.0444, "lng": 31.2357, "city": "Cairo", "country": "Egypt"}, earnings=0.0, uptime=97.9),
+            NodeInfo(id="demo-draft-johannesburg", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=37, price=0.03, gpu_memory="10 GB", location={"lat": -26.2041, "lng": 28.0473, "city": "Johannesburg", "country": "South Africa"}, earnings=0.0, uptime=98.2),
+            NodeInfo(id="demo-draft-nairobi", type="draft", hardware="NVIDIA RTX 3060", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=36, price=0.02, gpu_memory="12 GB", location={"lat": 1.2921, "lng": 36.8219, "city": "Nairobi", "country": "Kenya"}, earnings=0.0, uptime=97.7),
+            NodeInfo(id="demo-draft-lagos", type="draft", hardware="NVIDIA RTX 3070", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=38, price=0.03, gpu_memory="8 GB", location={"lat": 6.5244, "lng": 3.3792, "city": "Lagos", "country": "Nigeria"}, earnings=0.0, uptime=97.6),
+
+            NodeInfo(id="demo-draft-tel-aviv", type="draft", hardware="NVIDIA RTX 4080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=24, price=0.04, gpu_memory="16 GB", location={"lat": 32.0853, "lng": 34.7818, "city": "Tel Aviv", "country": "Israel"}, earnings=0.0, uptime=99.0),
+            NodeInfo(id="demo-draft-istanbul", type="draft", hardware="NVIDIA RTX 3090", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=23, price=0.03, gpu_memory="24 GB", location={"lat": 41.0082, "lng": 28.9784, "city": "Istanbul", "country": "Turkey"}, earnings=0.0, uptime=98.8),
+            NodeInfo(id="demo-draft-riyadh", type="draft", hardware="NVIDIA RTX 3080", model="Qwen/Qwen2.5-1.5B-Instruct", status="online", latency=26, price=0.03, gpu_memory="10 GB", location={"lat": 24.7136, "lng": 46.6753, "city": "Riyadh", "country": "Saudi Arabia"}, earnings=0.0, uptime=98.9),
         ]
         nodes.extend(demo_nodes)
 
@@ -834,13 +820,22 @@ def get_network_connections(include_demo: bool = False):
     static_connections = []
 
     if include_demo:
-        # Include demo network topology
+        # Include demo network topology - all draft nodes connect to all target nodes
         draft_nodes = [
             "real-draft-modal",
-            "demo-draft-us-east", "demo-draft-us-west", "demo-draft-eu-west",
-            "demo-draft-asia-south", "demo-draft-oceania", "demo-draft-south-america"
+            "demo-draft-us-east", "demo-draft-us-central", "demo-draft-us-west", "demo-draft-us-south",
+            "demo-draft-canada-east", "demo-draft-canada-west", "demo-draft-mexico",
+            "demo-draft-brazil", "demo-draft-argentina",
+            "demo-draft-uk", "demo-draft-france", "demo-draft-netherlands", "demo-draft-sweden", "demo-draft-spain",
+            "demo-draft-singapore", "demo-draft-hong-kong", "demo-draft-seoul", "demo-draft-bangkok",
+            "demo-draft-dubai", "demo-draft-mumbai", "demo-draft-bangalore",
+            "demo-draft-melbourne", "demo-draft-auckland", "demo-draft-cape-town"
         ]
-        target_nodes = ["real-target-modal", "demo-target-eu-central", "demo-target-asia-east"]
+        target_nodes = [
+            "real-target-modal",
+            "demo-target-eu-central", "demo-target-asia-east", "demo-target-us-east",
+            "demo-target-india", "demo-target-canada", "demo-target-oceania"
+        ]
     else:
         # Only real nodes
         draft_nodes = ["real-draft-modal"]
