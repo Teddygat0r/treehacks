@@ -20,9 +20,9 @@ const jetbrainsMono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: "SpecNet - Distributed Speculative Decoding",
+  title: "Nexus - Distributed Speculative Decoding",
   description:
-    "SpecNet is a distributed LLM inference engine using speculative decoding with edge draft GPUs and cloud target GPUs.",
+    "Nexus is a distributed LLM inference engine using speculative decoding with edge draft GPUs and cloud target GPUs.",
 }
 
 export const viewport: Viewport = {

@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { NetworkStatCard } from "@/components/network-stat-card"
-import { TargetNodesTable } from "@/components/target-nodes-table"
 import { DraftNodesTable } from "@/components/draft-nodes-table"
+import { TargetNodesTable } from "@/components/target-nodes-table"
+import { NetworkStatCard } from "@/components/network-stat-card"
 import { GlobalNetworkMap } from "@/components/global-network-map"
 import { Activity, Zap, DollarSign } from "lucide-react"
 import { fetchNodes, fetchStats } from "@/lib/api"
@@ -34,9 +34,9 @@ const DEFAULT_STATS = [
 ]
 
 export function NetworkExplorer() {
-  const [stats, setStats] = useState(DEFAULT_STATS)
   const [draftNodes, setDraftNodes] = useState<NodeInfo[]>([])
   const [targetNodes, setTargetNodes] = useState<NodeInfo[]>([])
+  const [stats, setStats] = useState(DEFAULT_STATS)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -44,7 +44,8 @@ export function NetworkExplorer() {
 
     async function load() {
       try {
-        const [nodes, netStats] = await Promise.all([fetchNodes(), fetchStats()])
+        const nodes = await fetchNodes()
+        const netStats = await fetchStats()
         if (cancelled) return
 
         setDraftNodes(nodes.filter(n => n.type === "draft"))
@@ -91,9 +92,9 @@ export function NetworkExplorer() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       {/* Page header */}
       <div>
-        <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">Network Explorer</h2>
+        <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">Network</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Live view of available Draft and Target nodes.
+          Live view of available Draft nodes.
         </p>
       </div>
 

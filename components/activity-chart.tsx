@@ -87,19 +87,20 @@ export function ActivityChart() {
 
   return (
     <motion.div
+      className="flex flex-col"
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.3, duration: 0.4 }}
     >
-      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+      <Card className="flex flex-1 flex-col border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
             <Activity className="h-4 w-4 text-primary" />
             Tokens Drafted — Last 24 Hours
           </CardTitle>
         </CardHeader>
-        <CardContent className="pb-4 pr-2">
-          <div className="h-52">
+        <CardContent className="flex-1 pb-4 pr-2">
+          <div className="h-full min-h-[13rem]">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart
                 data={chartData}
@@ -128,7 +129,7 @@ export function ActivityChart() {
                   tickFormatter={formatTokens}
                   tick={{ fontSize: 11, fill: "hsl(240, 5%, 55%)" }}
                 />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: "hsl(240, 4%, 16%)", opacity: 0.5 }} />
                 <Area
                   type="monotone"
                   dataKey="tokens"
