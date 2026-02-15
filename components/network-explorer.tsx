@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { NetworkStatCard } from "@/components/network-stat-card"
 import { TargetNodesTable } from "@/components/target-nodes-table"
 import { DraftNodesTable } from "@/components/draft-nodes-table"
+import { GlobalNetworkMap } from "@/components/global-network-map"
 import { Activity, Zap, DollarSign } from "lucide-react"
 import { fetchNodes, fetchStats } from "@/lib/api"
 import type { NodeInfo, NetworkStats } from "@/lib/types"
@@ -12,14 +13,14 @@ const DEFAULT_STATS = [
   {
     icon: Activity,
     label: "Total Active Nodes",
-    value: "1,204",
+    value: "0",
     sub: "nodes online",
     color: "hsl(142, 71%, 45%)",
   },
   {
     icon: Zap,
     label: "Current Network TPS",
-    value: "48,720",
+    value: "0",
     sub: "tokens/sec",
     color: "hsl(48, 96%, 53%)",
   },
@@ -60,7 +61,7 @@ export function NetworkExplorer() {
           {
             icon: Zap,
             label: "Current Network TPS",
-            value: netStats.total_tps > 0 ? netStats.total_tps.toLocaleString() : "48,720",
+            value: netStats.total_tps > 0 ? netStats.total_tps.toLocaleString() : "0",
             sub: "tokens/sec",
             color: "hsl(48, 96%, 53%)",
           },
@@ -102,6 +103,9 @@ export function NetworkExplorer() {
           <NetworkStatCard key={stat.label} {...stat} index={i} />
         ))}
       </div>
+
+      {/* Global Network Map */}
+      <GlobalNetworkMap />
 
       {/* Two-column tables */}
       <div className="grid gap-4 xl:grid-cols-2">

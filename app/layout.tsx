@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next"
 import { Inter, JetBrains_Mono, Space_Grotesk } from "next/font/google"
 import "./globals.css"
+import "leaflet/dist/leaflet.css"
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],

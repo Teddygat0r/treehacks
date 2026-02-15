@@ -54,12 +54,16 @@ class EarningsTracker:
         self.inference_history = []  # Recent inference records
         self.total_tokens = 0  # Track total tokens drafted
         self.total_acceptance_rate = 0.0  # Track cumulative acceptance rate for averaging
+        self.active_connections = []  # Track active inference routes
+        self.last_inference_route = None  # Track last inference for visualization
 
     def record_inference(self,
                         draft_tokens_generated: int,
                         draft_tokens_accepted: int,
                         target_tokens_verified: int,
-                        acceptance_rate: float):
+                        acceptance_rate: float,
+                        draft_node: str = "draft-us-east",
+                        target_node: str = "target-us-west"):
         """Record an inference and calculate earnings"""
         # Calculate earnings
         draft_earnings = (
@@ -84,6 +88,16 @@ class EarningsTracker:
         self.hourly_activity[current_hour]["tokens"] += draft_tokens_generated + target_tokens_verified
         self.hourly_activity[current_hour]["earnings"] += total_inference_earnings
 
+        # Track inference route for visualization
+        self.last_inference_route = {
+            "draft_node": draft_node,
+            "target_node": target_node,
+            "timestamp": datetime.now().isoformat(),
+            "tokens_generated": draft_tokens_generated,
+            "tokens_accepted": draft_tokens_accepted,
+            "acceptance_rate": acceptance_rate,
+        }
+
         # Store inference record
         record = {
             "timestamp": datetime.now().isoformat(),
@@ -94,6 +108,8 @@ class EarningsTracker:
             "draft_earnings": round(draft_earnings, 6),
             "target_earnings": round(target_earnings, 6),
             "total_earnings": round(total_inference_earnings, 6),
+            "draft_node": draft_node,
+            "target_node": target_node,
         }
         self.inference_history.append(record)
 
@@ -225,6 +241,9 @@ class NodeInfo(BaseModel):
     latency: float = 0.0
     price: float = 0.0
     gpu_memory: str = ""
+    location: dict = {"lat": 0.0, "lng": 0.0, "city": "Unknown", "country": "Unknown"}
+    earnings: float = 0.0
+    uptime: float = 100.0
 
 class NetworkStats(BaseModel):
     active_draft_nodes: int
@@ -394,6 +413,8 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
         draft_tokens_accepted=total_draft_accepted,
         target_tokens_verified=total_draft_generated,
         acceptance_rate=acceptance_rate,
+        draft_node="real-draft-modal",
+        target_node="real-target-modal",
     )
 
     yield ("done", summary, [])
@@ -497,6 +518,8 @@ def run_real_inference(prompt: str, params: InferenceRequest):
         draft_tokens_accepted=result["draft_tokens_accepted"],
         target_tokens_verified=result["draft_tokens_generated"],  # All drafted tokens get verified
         acceptance_rate=result["acceptance_rate"],
+        draft_node="real-draft-modal",
+        target_node="real-target-modal",
     )
 
     yield ("done", summary, [])
@@ -585,40 +608,175 @@ async def ws_stream_inference(websocket: WebSocket):
             pass
 
 @app.get("/api/nodes", response_model=list[NodeInfo])
-def get_nodes():
-    """Return active nodes."""
-    mode = "mock" if MOCK_MODE else "live"
-    return [
+def get_nodes(include_demo: bool = False):
+    """Return active nodes with optional demo nodes for visualization."""
+    # Real nodes - actual Modal infrastructure
+    nodes = [
         NodeInfo(
-            id="target-0",
+            id="real-draft-modal",
+            type="draft",
+            hardware="Modal A10G 24GB",
+            model="Qwen/Qwen2.5-1.5B-Instruct",
+            status="online",
+            latency=8,
+            price=0.05,
+            gpu_memory="24 GB",
+            location={"lat": 37.7749, "lng": -122.4194, "city": "San Francisco", "country": "USA (Modal)"},
+            earnings=round(earnings_tracker.total_earnings * 0.6, 2),
+            uptime=100.0,
+        ),
+        NodeInfo(
+            id="real-target-modal",
             type="target",
-            hardware="GPU Server",
+            hardware="Modal A100 80GB",
             model="Qwen/Qwen2.5-3B-Instruct",
             status="online",
             latency=12,
             price=2.49,
             gpu_memory="80 GB",
-        ),
-        NodeInfo(
-            id="draft-0",
-            type="draft",
-            hardware="Edge GPU" if not MOCK_MODE else "Mock CPU",
-            model=DRAFT_MODEL if not MOCK_MODE else "mock-model",
-            status="online",
-            latency=45,
-            price=0.05,
-            gpu_memory="12 GB" if not MOCK_MODE else "N/A",
+            location={"lat": 37.7749, "lng": -122.4194, "city": "San Francisco", "country": "USA (Modal)"},
+            earnings=round(earnings_tracker.total_earnings * 0.4, 2),
+            uptime=100.0,
         ),
     ]
+
+    # Add demo nodes if requested
+    if include_demo:
+        demo_nodes = [
+            # Demo Target nodes (verification) - High-end GPUs
+            NodeInfo(
+                id="demo-target-eu-central",
+                type="target",
+                hardware="NVIDIA A100 80GB",
+                model="Qwen/Qwen2.5-3B-Instruct",
+                status="online",
+                latency=18,
+                price=2.35,
+                gpu_memory="80 GB",
+                location={"lat": 52.5200, "lng": 13.4050, "city": "Berlin", "country": "Germany (Demo)"},
+                earnings=0.0,
+                uptime=99.5,
+            ),
+            NodeInfo(
+                id="demo-target-asia-east",
+                type="target",
+                hardware="NVIDIA A100 80GB",
+                model="Qwen/Qwen2.5-3B-Instruct",
+                status="busy",
+                latency=25,
+                price=2.29,
+                gpu_memory="80 GB",
+                location={"lat": 35.6762, "lng": 139.6503, "city": "Tokyo", "country": "Japan (Demo)"},
+                earnings=0.0,
+                uptime=99.2,
+            ),
+
+            # Demo Draft nodes - Distributed edge compute
+            NodeInfo(
+                id="demo-draft-us-east",
+                type="draft",
+                hardware="NVIDIA A10G 24GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="online",
+                latency=8,
+                price=0.05,
+                gpu_memory="24 GB",
+                location={"lat": 40.7128, "lng": -74.0060, "city": "New York", "country": "USA (Demo)"},
+                earnings=0.0,
+                uptime=99.9,
+            ),
+            NodeInfo(
+                id="demo-draft-us-west",
+                type="draft",
+                hardware="NVIDIA A10G 24GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="online",
+                latency=10,
+                price=0.05,
+                gpu_memory="24 GB",
+                location={"lat": 47.6062, "lng": -122.3321, "city": "Seattle", "country": "USA (Demo)"},
+                earnings=0.0,
+                uptime=98.7,
+            ),
+            NodeInfo(
+                id="demo-draft-eu-west",
+                type="draft",
+                hardware="NVIDIA RTX 4090 24GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="online",
+                latency=15,
+                price=0.04,
+                gpu_memory="24 GB",
+                location={"lat": 51.5074, "lng": -0.1278, "city": "London", "country": "UK (Demo)"},
+                earnings=0.0,
+                uptime=97.5,
+            ),
+            NodeInfo(
+                id="demo-draft-asia-south",
+                type="draft",
+                hardware="NVIDIA RTX 3090 24GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="online",
+                latency=22,
+                price=0.03,
+                gpu_memory="24 GB",
+                location={"lat": 1.3521, "lng": 103.8198, "city": "Singapore", "country": "Singapore (Demo)"},
+                earnings=0.0,
+                uptime=96.8,
+            ),
+            NodeInfo(
+                id="demo-draft-oceania",
+                type="draft",
+                hardware="NVIDIA RTX 4080 16GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="offline",
+                latency=35,
+                price=0.04,
+                gpu_memory="16 GB",
+                location={"lat": -33.8688, "lng": 151.2093, "city": "Sydney", "country": "Australia (Demo)"},
+                earnings=0.0,
+                uptime=95.2,
+            ),
+            NodeInfo(
+                id="demo-draft-south-america",
+                type="draft",
+                hardware="NVIDIA RTX 3080 10GB",
+                model="Qwen/Qwen2.5-1.5B-Instruct",
+                status="online",
+                latency=28,
+                price=0.03,
+                gpu_memory="10 GB",
+                location={"lat": -23.5505, "lng": -46.6333, "city": "São Paulo", "country": "Brazil (Demo)"},
+                earnings=0.0,
+                uptime=94.1,
+            ),
+        ]
+        nodes.extend(demo_nodes)
+
+    return nodes
 
 @app.get("/api/stats", response_model=NetworkStats)
 def get_stats():
     """Return network-wide statistics."""
+    # Calculate real stats from earnings tracker
+    num_inferences = len(earnings_tracker.inference_history)
+
+    # Calculate average acceptance rate from real data
+    if num_inferences > 0:
+        avg_acceptance = earnings_tracker.total_acceptance_rate / num_inferences
+    else:
+        avg_acceptance = 0.0
+
+    # Count active nodes (nodes with status "online" or "busy")
+    nodes_data = get_nodes()
+    active_draft = sum(1 for n in nodes_data if n.type == "draft" and n.status in ["online", "busy"])
+    active_target = sum(1 for n in nodes_data if n.type == "target" and n.status in ["online", "busy"])
+
     return NetworkStats(
-        active_draft_nodes=1,
-        active_target_nodes=1,
-        total_tps=145 if MOCK_MODE else 0,
-        avg_acceptance_rate=0.82 if MOCK_MODE else 0.0,
+        active_draft_nodes=active_draft,
+        active_target_nodes=active_target,
+        total_tps=0,  # Could calculate from recent inference rates
+        avg_acceptance_rate=avg_acceptance,
         avg_cost_per_1k=0.0004,
     )
 
@@ -664,6 +822,58 @@ def get_provider_stats():
         **summary,
         "avg_acceptance_rate": round(avg_acceptance, 3),
         "recent_inferences": recent_inferences,
+    }
+
+
+@app.get("/api/network/connections")
+def get_network_connections(include_demo: bool = False):
+    """Get network connections and active inference routes"""
+    import time
+
+    # Define static network topology (which nodes can connect to which)
+    static_connections = []
+
+    if include_demo:
+        # Include demo network topology
+        draft_nodes = [
+            "real-draft-modal",
+            "demo-draft-us-east", "demo-draft-us-west", "demo-draft-eu-west",
+            "demo-draft-asia-south", "demo-draft-oceania", "demo-draft-south-america"
+        ]
+        target_nodes = ["real-target-modal", "demo-target-eu-central", "demo-target-asia-east"]
+    else:
+        # Only real nodes
+        draft_nodes = ["real-draft-modal"]
+        target_nodes = ["real-target-modal"]
+
+    for draft in draft_nodes:
+        for target in target_nodes:
+            static_connections.append({
+                "from": draft,
+                "to": target,
+                "type": "potential"
+            })
+
+    # Check for active inference (within last 5 seconds)
+    active_route = None
+    if earnings_tracker.last_inference_route:
+        route_time = datetime.fromisoformat(earnings_tracker.last_inference_route["timestamp"])
+        time_diff = (datetime.now() - route_time).total_seconds()
+
+        if time_diff < 5:  # Show as active for 5 seconds after inference
+            active_route = {
+                "from": earnings_tracker.last_inference_route["draft_node"],
+                "to": earnings_tracker.last_inference_route["target_node"],
+                "type": "active",
+                "tokens": earnings_tracker.last_inference_route["tokens_generated"],
+                "acceptance_rate": earnings_tracker.last_inference_route["acceptance_rate"],
+                "timestamp": earnings_tracker.last_inference_route["timestamp"],
+            }
+
+    return {
+        "static_connections": static_connections,
+        "active_route": active_route,
+        "total_inferences": len(earnings_tracker.inference_history),
     }
 
 
