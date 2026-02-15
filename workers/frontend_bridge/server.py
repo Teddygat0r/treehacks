@@ -14,7 +14,7 @@ import sys
 import os
 import argparse
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from datetime import datetime
@@ -43,6 +43,24 @@ PRICING = {
 }
 
 app = FastAPI(title="Nexus Frontend Bridge")
+
+# ── API Key Validation ──
+
+def validate_api_key(authorization: Optional[str] = Header(None)):
+    """Validate API key from Authorization header"""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing API key. Include 'Authorization: Bearer YOUR_API_KEY' header.")
+
+    # Extract the key (support both "Bearer nx_..." and just "nx_..." formats)
+    api_key = authorization.replace("Bearer ", "").strip()
+
+    # Validate key format (starts with nx_ and has reasonable length)
+    if not api_key.startswith("nx_") or len(api_key) < 10:
+        raise HTTPException(status_code=401, detail="Invalid API key format. Key must start with 'nx_'.")
+
+    # For demo purposes, accept any key starting with nx_
+    # In production, you'd validate against a database
+    return api_key
 
 # ── Earnings Storage ──
 
@@ -252,6 +270,18 @@ class NetworkStats(BaseModel):
     total_tps: float
     avg_acceptance_rate: float
     avg_cost_per_1k: float
+
+class ModelPair(BaseModel):
+    id: str
+    draft_model: str
+    target_model: str
+    draft_size: str
+    target_size: str
+    acceptance_rate: float
+    speedup: str
+    price_per_1m: float
+    category: str
+    available: bool
 
 
 def _build_model_prompt(user_prompt: str) -> str:
@@ -582,8 +612,8 @@ def run_inference(prompt: str, params: InferenceRequest):
 # ── REST endpoints ──
 
 @app.post("/api/inference", response_model=InferenceResponse)
-def inference(req: InferenceRequest):
-    """Submit a prompt and get the full inference response."""
+def inference(req: InferenceRequest, api_key: str = Depends(validate_api_key)):
+    """Submit a prompt and get the full inference response. Requires API key."""
     result = None
     for event_type, data, _ in run_inference(req.prompt, req):
         if event_type == "done":
@@ -595,7 +625,7 @@ async def ws_stream_inference(websocket: WebSocket):
     """
     WebSocket endpoint for streaming inference.
 
-    Client sends: {"prompt": "...", "max_tokens": 64, ...}
+    Client sends: {"api_key": "nx_...", "prompt": "...", "max_tokens": 64, ...}
     Server sends:
       - {"type": "token", "data": {"text": "...", "type": "accepted"}}
       - {"type": "round", "data": {"round_num": 1, "accepted": 3, ...}}
@@ -604,7 +634,21 @@ async def ws_stream_inference(websocket: WebSocket):
     await websocket.accept()
     try:
         raw = await websocket.receive_text()
-        params = InferenceRequest(**json.loads(raw))
+        data = json.loads(raw)
+
+        # Validate API key from message
+        api_key = data.get("api_key", "")
+        if not api_key.startswith("nx_") or len(api_key) < 10:
+            await websocket.send_text(json.dumps({
+                "type": "error",
+                "data": {"message": "Invalid or missing API key. Include 'api_key' field in request."},
+            }))
+            await websocket.close()
+            return
+
+        # Remove api_key from data before creating InferenceRequest
+        data.pop("api_key", None)
+        params = InferenceRequest(**data)
 
         token_buffer: list[TokenEvent] = []
 
@@ -779,6 +823,60 @@ def get_stats():
         avg_acceptance_rate=avg_acceptance,
         avg_cost_per_1k=0.0004,
     )
+
+@app.get("/api/models/pairs", response_model=list[ModelPair])
+def get_model_pairs():
+    """Return available model pairs for speculative decoding"""
+    return [
+        ModelPair(
+            id="opt-350m-6.7b",
+            draft_model="OPT-350M",
+            target_model="OPT-6.7B",
+            draft_size="350M",
+            target_size="6.7B",
+            acceptance_rate=0.65,
+            speedup="2.1x",
+            price_per_1m=0.45,
+            category="OPT",
+            available=True,
+        ),
+        ModelPair(
+            id="opt-125m-6.7b",
+            draft_model="OPT-125M",
+            target_model="OPT-6.7B",
+            draft_size="125M",
+            target_size="6.7B",
+            acceptance_rate=0.55,
+            speedup="1.8x",
+            price_per_1m=0.38,
+            category="OPT",
+            available=True,
+        ),
+        ModelPair(
+            id="llama-2-7b-70b",
+            draft_model="Llama-2-7B",
+            target_model="Llama-2-70B",
+            draft_size="7B",
+            target_size="70B",
+            acceptance_rate=0.70,
+            speedup="2.5x",
+            price_per_1m=0.65,
+            category="Llama",
+            available=True,
+        ),
+        ModelPair(
+            id="qwen-2.5-1.5b-72b",
+            draft_model="Qwen-2.5-1.5B",
+            target_model="Qwen-2.5-72B",
+            draft_size="1.5B",
+            target_size="72B",
+            acceptance_rate=0.75,
+            speedup="2.8x",
+            price_per_1m=0.72,
+            category="Qwen",
+            available=True,
+        ),
+    ]
 
 @app.get("/api/health")
 def health():

@@ -4,6 +4,7 @@ import type {
   StreamMessage,
   NodeInfo,
   NetworkStats,
+  ModelPair,
 } from "./types"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
@@ -71,6 +72,13 @@ export async function fetchNodes(): Promise<NodeInfo[]> {
 export async function fetchStats(): Promise<NetworkStats> {
   const res = await fetch(`${API_URL}/api/stats`)
   if (!res.ok) throw new Error(`Failed to fetch stats: ${res.statusText}`)
+  return res.json()
+}
+
+/** GET /api/models/pairs */
+export async function fetchModelPairs(): Promise<ModelPair[]> {
+  const res = await fetch(`${API_URL}/api/models/pairs`)
+  if (!res.ok) throw new Error(`Failed to fetch model pairs: ${res.statusText}`)
   return res.json()
 }
 
