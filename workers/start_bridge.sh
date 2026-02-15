@@ -4,9 +4,11 @@ cd "$(dirname "$0")/.."
 
 export MODAL_APP_NAME="${MODAL_APP_NAME:-treehacks-verification-service}"
 export MODAL_CLASS_NAME="${MODAL_CLASS_NAME:-VerificationService}"
-export DRAFT_MODEL="${DRAFT_MODEL:-Qwen/Qwen3-0.6B}"
+export DRAFT_MODEL="${DRAFT_MODEL:-rd211/Qwen3-0.6B-Instruct}"
 export BRIDGE_PORT="${BRIDGE_PORT:-8000}"
-export SYSTEM_PROMPT="${SYSTEM_PROMPT:-You are a helpful AI assistant.}"
+export DEFAULT_MAX_TOKENS="${DEFAULT_MAX_TOKENS:-512}"
+export SYSTEM_PROMPT="${SYSTEM_PROMPT: -You are a precise, helpful assistant. Follow the user instructions exactly. If the request is ambiguous, ask one brief clarifying question before proceeding. Be concise by default. For coding tasks, provide correct, runnable solutions and call out assumptions. Do not invent facts; when uncertain, say so clearly.}"
+
 export PROMPT_FORMAT="${PROMPT_FORMAT:-chatml}"
 
 echo "Starting Frontend Bridge..."

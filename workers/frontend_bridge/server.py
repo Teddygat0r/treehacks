@@ -29,6 +29,7 @@ MODAL_CLASS_NAME = os.getenv("MODAL_CLASS_NAME", "VerificationService")
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 MOCK_MODE = os.getenv("MOCK_MODE", "").lower() in ("1", "true", "yes")
 TOKEN_SEND_BATCH_SIZE = max(1, int(os.getenv("TOKEN_SEND_BATCH_SIZE", "1")))
+DEFAULT_MAX_TOKENS = int(os.getenv("DEFAULT_MAX_TOKENS", "512"))
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", "You are a helpful AI assistant.")
 PROMPT_FORMAT = os.getenv("PROMPT_FORMAT", "chatml").lower()
 
@@ -202,7 +203,7 @@ app.add_middleware(
 
 class InferenceRequest(BaseModel):
     prompt: str
-    max_tokens: int = Field(default=64, ge=1, le=512)
+    max_tokens: int = Field(default=DEFAULT_MAX_TOKENS, ge=1, le=4096)
     temperature: float = Field(default=0.8, ge=0.0, le=2.0)
     top_k: int = Field(default=50, ge=-1)
     draft_tokens: int = Field(default=5, ge=1, le=20)
@@ -325,7 +326,8 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
     speculation_rounds = 0
 
     i = 0
-    while i < len(words) and len(all_token_events) < params.max_tokens:
+    output_token_count = 0
+    while i < len(words) and output_token_count < params.max_tokens:
         speculation_rounds += 1
         round_token_events: list[TokenEvent] = []
         round_drafted = 0
@@ -333,7 +335,7 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
         round_corrected = 0
 
         # Simulate a draft round of N tokens
-        draft_count = min(params.draft_tokens, len(words) - i, params.max_tokens - len(all_token_events))
+        draft_count = min(params.draft_tokens, len(words) - i, params.max_tokens - output_token_count)
 
         for j in range(draft_count):
             word = words[i + j]
@@ -348,6 +350,7 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
                 round_token_events.append(TokenEvent(text=text, type="accepted", logprob=-0.1))
                 round_accepted += 1
                 total_draft_accepted += 1
+                output_token_count += 1
             else:
                 # Rejected token, then a corrected replacement
                 round_token_events.append(TokenEvent(text=text, type="rejected", logprob=-2.5))
@@ -365,6 +368,7 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
                 total_draft_generated += 1
                 total_draft_accepted += 1
                 round_token_events.append(TokenEvent(text=prefix + corrected_word, type="corrected", logprob=-0.3))
+                output_token_count += 1
                 break  # After a rejection, the round ends
 
         i += draft_count if round_corrected == 0 else (j + 1)  # noqa: F821
