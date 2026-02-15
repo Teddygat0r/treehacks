@@ -157,6 +157,69 @@ def load_humaneval_from_hf(num_samples=50):
         return HUMANEVAL_SAMPLES[:num_samples]
 
 
+def run_baseline(
+    questions,
+    max_tokens=512,
+    temperature=0.0,
+    humaneval=False,
+):
+    """Run baseline autoregressive inference on the target model via Modal."""
+    import modal
+
+    print("\n" + "="*100)
+    print("BASELINE: Autoregressive inference on target model (no speculative decoding)")
+    print("="*100 + "\n")
+
+    service = modal.Cls.from_name(
+        "treehacks-verification-service", "VerificationService"
+    )()
+
+    results = []
+    total_start = time.time()
+
+    for i, item in enumerate(questions):
+        print(f"  Baseline {i+1}/{len(questions)}...", end=" ", flush=True)
+
+        if humaneval:
+            prompt_text = item["prompt"]
+            model_prompt = f"Complete the following Python function. Output only the function body completion, no explanation.\n\n{prompt_text}"
+        else:
+            model_prompt = f"Question: {item['question']}\n\nAnswer: Let's solve this step by step.\n"
+
+        start = time.time()
+        resp = service.generate.remote(
+            prompt=model_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_k=-1 if temperature == 0 else 50,
+        )
+        elapsed = time.time() - start
+
+        num_tokens = resp["num_tokens"]
+        tps = num_tokens / elapsed if elapsed > 0 else 0.0
+        print(f"{num_tokens} tokens in {elapsed:.1f}s ({tps:.1f} tok/s)")
+
+        results.append({
+            'question_num': i + 1,
+            'num_tokens': num_tokens,
+            'wall_time_seconds': elapsed,
+            'generation_time_ms': resp["generation_time_ms"],
+            'tokens_per_sec': tps,
+            'generated_text': resp["generated_text"],
+        })
+
+    total_elapsed = time.time() - total_start
+    avg_tps = sum(r['tokens_per_sec'] for r in results) / len(results) if results else 0
+    total_tokens = sum(r['num_tokens'] for r in results)
+
+    print(f"\nBaseline summary:")
+    print(f"  Total time: {total_elapsed:.1f}s")
+    print(f"  Total tokens: {total_tokens}")
+    print(f"  Avg speed: {avg_tps:.1f} tokens/sec")
+
+    return results, total_elapsed
+
+
 def run_benchmark(
     draft_model="Qwen/Qwen2.5-1.5B-Instruct",
     target_model="Qwen/Qwen2.5-3B-Instruct",
@@ -168,6 +231,8 @@ def run_benchmark(
     num_candidates=1,
     candidate_temperature=1.0,
     candidate_top_p=0.9,
+    optimistic_prefill=True,
+    compare_baseline=False,
 ):
     """Run benchmark (GSM8K or HumanEval)"""
 
@@ -187,6 +252,7 @@ def run_benchmark(
     if num_candidates > 1:
         print(f"  Candidate Temperature: {candidate_temperature}")
         print(f"  Candidate Top-P: {candidate_top_p}")
+    print(f"  Optimistic Prefill: {optimistic_prefill}")
     print("="*100 + "\n")
 
     # Load dataset
@@ -201,6 +267,16 @@ def run_benchmark(
         else:
             questions = GSM8K_SAMPLES[:num_samples]
 
+    # Run baseline FIRST (cold target, no KV cache advantage)
+    baseline_data = None
+    if compare_baseline:
+        baseline_results, baseline_elapsed = run_baseline(
+            questions=questions,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            humaneval=humaneval,
+        )
+
     # Initialize client
     print("Initializing draft node client...")
     client = DraftNodeClient(
@@ -209,6 +285,7 @@ def run_benchmark(
         num_candidates=num_candidates,
         candidate_temperature=candidate_temperature,
         candidate_top_p=candidate_top_p,
+        optimistic_prefill=optimistic_prefill,
     )
 
     # Run benchmark
@@ -244,7 +321,7 @@ def run_benchmark(
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_k=-1 if temperature == 0 else 50,
-                draft_tokens=10,
+                draft_tokens=5,
             ),
             model_id=target_model,
             timestamp=int(time.time() * 1000),
@@ -285,7 +362,11 @@ def run_benchmark(
             'tokens_per_sec': response.total_tokens / (response.generation_time_ms / 1000) if response.generation_time_ms > 0 else 0,
             'timing_draft_ms': timing_data.get('timing_draft_ms', []),
             'timing_verify_ms': timing_data.get('timing_verify_ms', []),
+            'timing_verify_server_ms': timing_data.get('timing_verify_server_ms', []),
             'timing_process_ms': timing_data.get('timing_process_ms', []),
+            'timing_optimistic_ms': timing_data.get('timing_optimistic_ms', []),
+            'optimistic_hits': client._optimistic_hits,
+            'optimistic_misses': client._optimistic_misses,
         })
         results.append(result)
 
@@ -345,37 +426,104 @@ def run_benchmark(
         if count > 0:
             print(f"   {label}: {count} questions ({count/len(results)*100:.1f}%)")
 
+    # Print baseline comparison (baseline was run before spec decoding)
+    if compare_baseline:
+        baseline_avg_tps = sum(r['tokens_per_sec'] for r in baseline_results) / len(baseline_results) if baseline_results else 0
+        baseline_total_tokens = sum(r['num_tokens'] for r in baseline_results)
+
+        # Print comparison
+        print("\n" + "="*100)
+        print("COMPARISON: Speculative Decoding vs Baseline Autoregressive")
+        print("="*100)
+        print(f"\n{'Metric':<30} {'Spec. Decoding':<20} {'Baseline':<20} {'Speedup':<15}")
+        print("─" * 85)
+
+        # Per-question comparison
+        for i in range(len(results)):
+            spec_r = results[i]
+            base_r = baseline_results[i] if i < len(baseline_results) else None
+            if base_r:
+                speedup = base_r['wall_time_seconds'] / spec_r['wall_time_seconds'] if spec_r['wall_time_seconds'] > 0 else float('inf')
+                print(f"  Q{spec_r['question_num']:<3} time               {spec_r['wall_time_seconds']:>6.1f}s              {base_r['wall_time_seconds']:>6.1f}s              {speedup:>5.2f}x")
+
+        print("─" * 85)
+
+        spec_total_time = sum(r['wall_time_seconds'] for r in results)
+        base_total_time = sum(r['wall_time_seconds'] for r in baseline_results)
+        overall_speedup = base_total_time / spec_total_time if spec_total_time > 0 else float('inf')
+
+        print(f"{'Total time':<30} {spec_total_time:>6.1f}s              {base_total_time:>6.1f}s              {overall_speedup:>5.2f}x")
+        print(f"{'Avg tokens/sec':<30} {avg_speed:>6.1f}               {baseline_avg_tps:>6.1f}               {avg_speed/baseline_avg_tps if baseline_avg_tps > 0 else 0:>5.2f}x")
+        print(f"{'Total tokens':<30} {total_tokens:<20} {baseline_total_tokens:<20}")
+
+        # Verifier time: server-side GPU time only (no network overhead)
+        total_verify_server_ms = sum(sum(r.get('timing_verify_server_ms', [])) for r in results)
+        total_verify_wall_ms = sum(sum(r.get('timing_verify_ms', [])) for r in results)
+        total_verify_server_s = total_verify_server_ms / 1000
+        total_verify_wall_s = total_verify_wall_ms / 1000
+        baseline_gen_time_s = sum(r.get('generation_time_ms', 0) / 1000 for r in baseline_results)
+        verifier_savings = (1 - total_verify_server_s / baseline_gen_time_s) * 100 if baseline_gen_time_s > 0 else 0
+        network_overhead_s = total_verify_wall_s - total_verify_server_s
+
+        print(f"\n{'Target GPU time (verify)':<30} {total_verify_server_s:>6.1f}s              {baseline_gen_time_s:>6.1f}s              {verifier_savings:>5.1f}% saved")
+        print(f"{'Network overhead':<30} {network_overhead_s:>6.1f}s")
+
+        print(f"\nOverall speedup: {overall_speedup:.2f}x faster with speculative decoding")
+        print("="*100 + "\n")
+
+        baseline_data = {
+            'baseline_results': baseline_results,
+            'baseline_total_time': baseline_elapsed,
+            'baseline_avg_tps': baseline_avg_tps,
+            'baseline_total_tokens': baseline_total_tokens,
+            'overall_speedup': overall_speedup,
+            'spec_verify_gpu_time_s': total_verify_server_s,
+            'spec_verify_wall_time_s': total_verify_wall_s,
+            'spec_network_overhead_s': network_overhead_s,
+            'baseline_target_gen_time_s': baseline_gen_time_s,
+            'target_model_time_saved_pct': verifier_savings,
+        }
+
     # Save results to logs folder
     script_dir = os.path.dirname(os.path.abspath(__file__))
     logs_dir = os.path.join(script_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
     output_prefix = "humaneval" if humaneval else "gsm8k"
     output_file = os.path.join(logs_dir, f"{output_prefix}_benchmark_{int(time.time())}.json")
+
+    output_data = {
+        'config': {
+            'dataset': benchmark_name,
+            'draft_model': draft_model,
+            'target_model': target_model,
+            'num_samples': num_samples,
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'num_candidates': num_candidates,
+            'candidate_temperature': candidate_temperature,
+            'candidate_top_p': candidate_top_p,
+            'optimistic_prefill': optimistic_prefill,
+            'compare_baseline': compare_baseline,
+        },
+        'summary': {
+            'avg_acceptance_rate': avg_acceptance,
+            'avg_speed': avg_speed,
+            'avg_time_per_question': avg_time_per_question,
+            'total_tokens': total_tokens,
+            'total_draft_generated': total_draft_generated,
+            'total_draft_accepted': total_draft_accepted,
+            'total_time': total_elapsed,
+            'num_questions': len(results),
+            'optimistic_hits': client._optimistic_hits,
+            'optimistic_misses': client._optimistic_misses,
+        },
+        'results': results,
+    }
+    if baseline_data:
+        output_data['baseline'] = baseline_data
+
     with open(output_file, 'w') as f:
-        json.dump({
-            'config': {
-                'dataset': benchmark_name,
-                'draft_model': draft_model,
-                'target_model': target_model,
-                'num_samples': num_samples,
-                'max_tokens': max_tokens,
-                'temperature': temperature,
-                'num_candidates': num_candidates,
-                'candidate_temperature': candidate_temperature,
-                'candidate_top_p': candidate_top_p,
-            },
-            'summary': {
-                'avg_acceptance_rate': avg_acceptance,
-                'avg_speed': avg_speed,
-                'avg_time_per_question': avg_time_per_question,
-                'total_tokens': total_tokens,
-                'total_draft_generated': total_draft_generated,
-                'total_draft_accepted': total_draft_accepted,
-                'total_time': total_elapsed,
-                'num_questions': len(results),
-            },
-            'results': results,
-        }, f, indent=2)
+        json.dump(output_data, f, indent=2)
 
     print(f"\n💾 Results saved to: {output_file}")
     print("="*100 + "\n")
@@ -406,6 +554,10 @@ def main():
                         help='Temperature for multi-candidate draft sampling (default: 1.0)')
     parser.add_argument('--candidate-top-p', type=float, default=0.9,
                         help='Top-p for multi-candidate draft sampling (default: 0.9)')
+    parser.add_argument('--no-optimistic-prefill', action='store_true',
+                        help='Disable optimistic prefill (enabled by default)')
+    parser.add_argument('--compare-baseline', action='store_true',
+                        help='Also run baseline autoregressive inference on target model for comparison')
 
     args = parser.parse_args()
 
@@ -420,6 +572,8 @@ def main():
         num_candidates=args.num_candidates,
         candidate_temperature=args.candidate_temp,
         candidate_top_p=args.candidate_top_p,
+        optimistic_prefill=not args.no_optimistic_prefill,
+        compare_baseline=args.compare_baseline,
     )
 
 

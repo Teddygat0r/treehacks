@@ -229,6 +229,82 @@ class ProbabilisticVerification(VerificationStrategy):
 
         return num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs
 
+    def verify_batch(self, candidates, target_token_ids, target_logprobs):
+        """Vectorized batch verification using numpy for probabilistic strategy."""
+        n = len(candidates)
+        k = len(target_token_ids)
+
+        if n == 0 or k == 0:
+            return [(0, [], [], []) for _ in range(n)]
+
+        # Build (N, K) draft matrix and target array
+        draft_matrix = np.zeros((n, k), dtype=np.int64)
+        draft_logprob_matrix = np.full((n, k), -23.0)  # ~1e-10 in log space
+        draft_lengths = np.zeros(n, dtype=np.int64)
+        for i, c in enumerate(candidates):
+            length = min(len(c['draft_token_ids']), k)
+            draft_matrix[i, :length] = c['draft_token_ids'][:length]
+            lp_len = min(len(c['draft_logprobs']), length)
+            draft_logprob_matrix[i, :lp_len] = c['draft_logprobs'][:lp_len]
+            draft_lengths[i] = length
+
+        target_array = np.array(target_token_ids[:k])  # (k,)
+
+        # Exact match matrix: (N, K)
+        match_matrix = (draft_matrix == target_array)
+
+        # Build target logprob matrix for draft tokens: p_target(draft_token)
+        # Shape: (N, K)
+        target_logprob_for_draft = np.full((n, k), -23.0)  # log(1e-10)
+        if target_logprobs:
+            for j in range(min(k, len(target_logprobs))):
+                lp_dict = target_logprobs[j]
+                for i in range(n):
+                    if j < int(draft_lengths[i]):
+                        tid = int(draft_matrix[i, j])
+                        if tid in lp_dict:
+                            target_logprob_for_draft[i, j] = lp_dict[tid].logprob
+
+        # Compute alpha = min(1, p_target / p_draft) for non-matching positions
+        p_target = np.exp(target_logprob_for_draft)
+        p_draft = np.exp(draft_logprob_matrix)
+        alpha = np.minimum(1.0, p_target / np.maximum(p_draft, 1e-10))
+
+        # Random matrix for probabilistic acceptance
+        rand_matrix = np.random.random((n, k))
+
+        # Accept if exact match OR probabilistic acceptance
+        accept_matrix = match_matrix | (rand_matrix < alpha)
+
+        # Mask out positions beyond each candidate's actual length
+        for i in range(n):
+            accept_matrix[i, int(draft_lengths[i]):] = False
+
+        # Find accepted prefix length via cumprod
+        cumulative_accept = np.cumprod(accept_matrix, axis=1)
+        accepted_lengths = cumulative_accept.sum(axis=1).astype(int)
+
+        # Build per-candidate results
+        results = []
+        for i in range(n):
+            num_accepted = int(accepted_lengths[i])
+            dl = int(draft_lengths[i])
+            acceptance_mask = accept_matrix[i, :dl].tolist()
+
+            corrected_tokens = []
+            corrected_logprobs_list = []
+            if num_accepted < dl and num_accepted < k:
+                target_token = int(target_array[num_accepted])
+                corrected_tokens.append(target_token)
+                if target_logprobs and num_accepted < len(target_logprobs):
+                    lp_dict = target_logprobs[num_accepted]
+                    if target_token in lp_dict:
+                        corrected_logprobs_list.append(lp_dict[target_token].logprob)
+
+            results.append((num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs_list))
+
+        return results
+
 
 class ThresholdVerification(VerificationStrategy):
     """
@@ -292,6 +368,70 @@ class ThresholdVerification(VerificationStrategy):
             break
 
         return num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs
+
+    def verify_batch(self, candidates, target_token_ids, target_logprobs):
+        """Vectorized batch verification using numpy for threshold strategy."""
+        n = len(candidates)
+        k = len(target_token_ids)
+
+        if n == 0 or k == 0:
+            return [(0, [], [], []) for _ in range(n)]
+
+        # Build (N, K) draft matrix
+        draft_matrix = np.zeros((n, k), dtype=np.int64)
+        draft_lengths = np.zeros(n, dtype=np.int64)
+        for i, c in enumerate(candidates):
+            length = min(len(c['draft_token_ids']), k)
+            draft_matrix[i, :length] = c['draft_token_ids'][:length]
+            draft_lengths[i] = length
+
+        target_array = np.array(target_token_ids[:k])  # (k,)
+
+        # Exact match matrix: (N, K)
+        match_matrix = (draft_matrix == target_array)
+
+        # Build target probability matrix for draft tokens: p_target(draft_token)
+        target_prob_for_draft = np.full((n, k), 0.0)
+        if target_logprobs:
+            for j in range(min(k, len(target_logprobs))):
+                lp_dict = target_logprobs[j]
+                for i in range(n):
+                    if j < int(draft_lengths[i]):
+                        tid = int(draft_matrix[i, j])
+                        if tid in lp_dict:
+                            target_prob_for_draft[i, j] = np.exp(lp_dict[tid].logprob)
+
+        # Accept if exact match OR p_target >= threshold
+        accept_matrix = match_matrix | (target_prob_for_draft >= self.threshold)
+
+        # Mask out positions beyond each candidate's actual length
+        for i in range(n):
+            accept_matrix[i, int(draft_lengths[i]):] = False
+
+        # Find accepted prefix length via cumprod
+        cumulative_accept = np.cumprod(accept_matrix, axis=1)
+        accepted_lengths = cumulative_accept.sum(axis=1).astype(int)
+
+        # Build per-candidate results
+        results = []
+        for i in range(n):
+            num_accepted = int(accepted_lengths[i])
+            dl = int(draft_lengths[i])
+            acceptance_mask = accept_matrix[i, :dl].tolist()
+
+            corrected_tokens = []
+            corrected_logprobs_list = []
+            if num_accepted < dl and num_accepted < k:
+                target_token = int(target_array[num_accepted])
+                corrected_tokens.append(target_token)
+                if target_logprobs and num_accepted < len(target_logprobs):
+                    lp_dict = target_logprobs[num_accepted]
+                    if target_token in lp_dict:
+                        corrected_logprobs_list.append(lp_dict[target_token].logprob)
+
+            results.append((num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs_list))
+
+        return results
 
 
 class GreedyVerification(VerificationStrategy):

@@ -53,8 +53,9 @@ class VerificationService:
 
         self.llm = LLM(
             model=self.model_name,
-            gpu_memory_utilization=0.8,
+            gpu_memory_utilization=0.90,
             max_model_len=4096,
+            enable_prefix_caching=True,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
@@ -96,8 +97,6 @@ class VerificationService:
                 "acceptance_rate": 0.0,
             }
 
-        prefix_text = self.tokenizer.decode(prefix_token_ids, skip_special_tokens=True)
-
         sampling_params = SamplingParams(
             temperature=temperature if temperature > 0 else 0.8,
             top_k=top_k if top_k > 0 else -1,
@@ -110,7 +109,7 @@ class VerificationService:
         print(f"  Verifying {num_draft_tokens} draft tokens (temp={sampling_params.temperature}, top_k={sampling_params.top_k})")
 
         outputs = self.llm.generate(
-            prompts=[prefix_text],
+            prompts=[{"prompt_token_ids": prefix_token_ids}],
             sampling_params=sampling_params,
             use_tqdm=False,
         )
@@ -201,8 +200,6 @@ class VerificationService:
             }
 
         # Single target model forward pass
-        prefix_text = self.tokenizer.decode(prefix_token_ids, skip_special_tokens=True)
-
         sampling_params = SamplingParams(
             temperature=temperature if temperature > 0 else 0.8,
             top_k=top_k if top_k > 0 else -1,
@@ -215,7 +212,7 @@ class VerificationService:
         print(f"  Multi-candidate verify: {n} candidates, max_draft_len={max_draft_len}")
 
         outputs = self.llm.generate(
-            prompts=[prefix_text],
+            prompts=[{"prompt_token_ids": prefix_token_ids}],
             sampling_params=sampling_params,
             use_tqdm=False,
         )
@@ -285,6 +282,48 @@ class VerificationService:
             "candidate_results": candidate_results,
             "best_candidate_idx": best_idx,
             "verification_time_ms": verification_time,
+        }
+
+    @modal.method()
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 512,
+        temperature: float = 0.8,
+        top_k: int = -1,
+    ) -> dict:
+        """Plain autoregressive generation (baseline, no speculative decoding)."""
+        import time
+        from vllm import SamplingParams
+
+        start_time = time.time()
+
+        sampling_params = SamplingParams(
+            temperature=temperature if temperature > 0 else 0.8,
+            top_k=top_k if top_k > 0 else -1,
+            top_p=0.95,
+            max_tokens=max_tokens,
+            seed=42,
+        )
+
+        outputs = self.llm.generate(
+            prompts=[prompt],
+            sampling_params=sampling_params,
+            use_tqdm=False,
+        )
+
+        output = outputs[0].outputs[0]
+        generated_text = self.tokenizer.decode(
+            list(self.tokenizer.encode(prompt)) + list(output.token_ids),
+            skip_special_tokens=True,
+        )
+        generation_time = (time.time() - start_time) * 1000
+
+        return {
+            "generated_text": generated_text,
+            "token_ids": list(output.token_ids),
+            "num_tokens": len(output.token_ids),
+            "generation_time_ms": generation_time,
         }
 
     @modal.method()
