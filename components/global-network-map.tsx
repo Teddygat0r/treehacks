@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState, useRef } from "react"
 import { motion } from "framer-motion"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -111,22 +111,32 @@ function curvedLine(
 
 function FitBoundsToNodes({
   positions,
+  refitTrigger,
 }: {
   positions: [number, number][]
+  refitTrigger: number
 }) {
   const map = useMap()
+  const lastTrigger = useRef<number>(-1)
+
   useEffect(() => {
-    if (positions.length === 0) return
+    // Refit bounds when trigger changes (initial load, popup close, or demo mode change)
+    if (lastTrigger.current === refitTrigger || positions.length === 0) return
+
+    lastTrigger.current = refitTrigger
+
     if (positions.length === 1) {
       map.setView(positions[0], 10)
       return
     }
+
     // Use dynamic import for leaflet to avoid SSR issues
     import("leaflet").then((L) => {
       const bounds = L.latLngBounds(positions)
       map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 })
     })
-  }, [map, positions])
+  }, [map, positions, refitTrigger])
+
   return null
 }
 
@@ -138,8 +148,9 @@ export function GlobalNetworkMap() {
     total_inferences: 0,
   })
   const [isClient, setIsClient] = useState(false)
-  const [showDemoNodes, setShowDemoNodes] = useState(false)
+  const [showDemoNodes, setShowDemoNodes] = useState(true)
   const [animatedTransmissions, setAnimatedTransmissions] = useState<AnimatedTransmission[]>([])
+  const [refitTrigger, setRefitTrigger] = useState(0)
 
   useEffect(() => {
     setIsClient(true)
@@ -166,6 +177,13 @@ export function GlobalNetworkMap() {
 
     return () => clearInterval(interval)
   }, [showDemoNodes])
+
+  // Trigger map refit when nodes are updated (after fetching new data)
+  useEffect(() => {
+    if (nodes.length > 0) {
+      setRefitTrigger((prev) => prev + 1)
+    }
+  }, [nodes.length])
 
   // Simulate active data transmissions with 7-second duration
   useEffect(() => {
@@ -215,30 +233,45 @@ export function GlobalNetworkMap() {
     return node.type === "target" ? 12 : 6
   }
 
-  // Get adjusted position for nodes to prevent overlap at same location
+  // Get adjusted position for nodes to prevent overlap at same or very close location
   const getNodePosition = (node: Node): [number, number] => {
     const { lat, lng } = node.location
 
-    // Find all nodes at the same location
+    // Find all nodes at the exact same location
     const nodesAtLocation = nodes.filter(
       (n) => n.location.lat === lat && n.location.lng === lng
     )
 
-    // If only one node at this location, return as-is
-    if (nodesAtLocation.length === 1) {
-      return [lat, lng]
+    if (nodesAtLocation.length > 1) {
+      // Multiple nodes at same location - apply offset in a circle
+      const index = nodesAtLocation.findIndex((n) => n.id === node.id)
+      const offsetDistance = 0.02
+      const angle = (index * 2 * Math.PI) / nodesAtLocation.length
+      return [
+        lat + offsetDistance * Math.cos(angle),
+        lng + offsetDistance * Math.sin(angle),
+      ]
     }
 
-    // Multiple nodes at same location - apply offset (smaller now that map fits bounds)
-    const index = nodesAtLocation.findIndex((n) => n.id === node.id)
-    const offsetDistance = 0.02 // degrees
+    // If draft is very close to any target, offset the draft so they don't overlap visually
+    if (node.type === "draft") {
+      const targets = nodes.filter((n) => n.type === "target")
+      const minDistDeg = 0.08 // ~8–9 km; drafts within this of a target get pushed
+      for (const t of targets) {
+        const dLat = t.location.lat - lat
+        const dLng = t.location.lng - lng
+        const distSq = dLat * dLat + dLng * dLng
+        if (distSq < minDistDeg * minDistDeg && distSq > 0) {
+          const dist = Math.sqrt(distSq)
+          const push = 0.06 // push draft this many degrees away from target
+          const uLat = dLat / dist
+          const uLng = dLng / dist
+          return [lat - uLat * push, lng - uLng * push]
+        }
+      }
+    }
 
-    // Arrange in a circle around the original point
-    const angle = (index * 2 * Math.PI) / nodesAtLocation.length
-    const offsetLat = lat + offsetDistance * Math.cos(angle)
-    const offsetLng = lng + offsetDistance * Math.sin(angle)
-
-    return [offsetLat, offsetLng]
+    return [lat, lng]
   }
 
   const nodePositions = useMemo(
@@ -258,11 +291,6 @@ export function GlobalNetworkMap() {
         return ""
     }
   }
-
-  // All nodes are shown as online in the visualization
-  const totalNodes = nodes.length
-  const draftNodes = nodes.filter((n) => n.type === "draft").length
-  const targetNodes = nodes.filter((n) => n.type === "target").length
 
   if (!isClient) {
     return (
@@ -352,20 +380,29 @@ export function GlobalNetworkMap() {
               Global Distributed GPU Network
             </CardTitle>
             <div className="flex items-center gap-4 text-xs">
-              {/* Demo Toggle */}
-              <button
-                onClick={() => setShowDemoNodes(!showDemoNodes)}
-                className={`flex items-center gap-2 rounded-md border px-3 py-1.5 transition-colors ${
-                  showDemoNodes
-                    ? "border-primary/30 bg-primary/10 text-primary"
-                    : "border-border/40 bg-secondary/20 text-muted-foreground hover:bg-secondary/30"
-                }`}
-              >
-                <div className={`h-2 w-2 rounded-full ${showDemoNodes ? "bg-primary animate-pulse" : "bg-muted-foreground"}`}></div>
-                <span className="text-[11px] font-medium">
-                  {showDemoNodes ? "Demo Mode ON" : "Real Nodes Only"}
+              {/* Demo data toggle */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  Demo data
                 </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDemoNodes(!showDemoNodes)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 overflow-hidden rounded-full border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+                    showDemoNodes
+                      ? "border-primary bg-primary"
+                      : "border-border bg-muted"
+                  }`}
+                  aria-label="Toggle demo data"
+                  aria-pressed={showDemoNodes}
+                >
+                  <span
+                    className={`absolute top-1/2 left-1 -translate-y-1/2 h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ease-out ${
+                      showDemoNodes ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
               {connections.active_route && (
                 <>
                   <div className="h-4 w-px bg-border/40"></div>
@@ -379,8 +416,7 @@ export function GlobalNetworkMap() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-3">
-            <div className="flex-1 overflow-hidden rounded-lg border border-border/40">
+          <div className="overflow-hidden rounded-lg border border-border/40">
             <MapContainer
               center={[20, 0]}
               zoom={2}
@@ -392,7 +428,7 @@ export function GlobalNetworkMap() {
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
               />
 
-              <FitBoundsToNodes positions={nodePositions} />
+              <FitBoundsToNodes positions={nodePositions} refitTrigger={refitTrigger} />
 
               {/* Draw static connection lines (visible network topology) */}
               {connections.static_connections.map((conn, idx) => {
@@ -432,7 +468,11 @@ export function GlobalNetworkMap() {
                       }}
                     >
                       {isRealActive && connections.active_route && (
-                        <Popup>
+                        <Popup
+                          eventHandlers={{
+                            popupclose: () => setRefitTrigger((prev) => prev + 1),
+                          }}
+                        >
                           <div className="space-y-2 p-1">
                             <div className="flex items-center gap-2">
                               <Activity className="h-4 w-4 text-yellow-400" />
@@ -538,7 +578,12 @@ export function GlobalNetworkMap() {
                   opacity={0.6}
                   fillOpacity={0.9}
                 >
-                  <Popup className="custom-popup">
+                  <Popup
+                    className="custom-popup"
+                    eventHandlers={{
+                      popupclose: () => setRefitTrigger((prev) => prev + 1),
+                    }}
+                  >
                     <div className="min-w-64 space-y-3 p-2">
                       {/* Header */}
                       <div className="flex items-start justify-between gap-3">
@@ -646,47 +691,8 @@ export function GlobalNetworkMap() {
                   <div className="h-2 w-2 rounded-full bg-cyan-400"></div>
                   <span>Verification</span>
                 </div>
-                <div className="ml-auto text-xs text-muted-foreground">
-                  <span className="font-semibold text-foreground">
-                    {connections.total_inferences}
-                  </span>{" "}
-                  real inferences • <span className="font-semibold text-yellow-500">
-                    {animatedTransmissions.length}
-                  </span>{" "}
-                  active transmissions
-                </div>
               </div>
             </div>
-
-            {/* Right sidebar with node counts */}
-            <div className="w-48 shrink-0 space-y-3">
-              <div className="rounded-lg border border-border/40 bg-card/50 p-4">
-                <h3 className="text-xs font-medium text-muted-foreground mb-3">Network Stats</h3>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full bg-green-500"></div>
-                      <span className="text-xs text-muted-foreground">Draft</span>
-                    </div>
-                    <span className="text-lg font-bold text-foreground">{draftNodes}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="h-3 w-3 rounded-full bg-blue-500"></div>
-                      <span className="text-xs text-muted-foreground">Target</span>
-                    </div>
-                    <span className="text-lg font-bold text-foreground">{targetNodes}</span>
-                  </div>
-                  <div className="border-t border-border/40 pt-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-muted-foreground">Total</span>
-                      <span className="text-2xl font-bold text-primary">{totalNodes}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </CardContent>
       </Card>
     </motion.div>

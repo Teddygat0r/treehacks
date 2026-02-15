@@ -100,17 +100,24 @@ export function NetworkExplorer() {
       {/* Stats row */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {stats.map((stat, i) => (
-          <NetworkStatCard key={stat.label} {...stat} index={i} />
+          <NetworkStatCard
+            key={stat.label}
+            {...stat}
+            index={i}
+            breakdown={i === 0 ? { draft: draftNodes.length, target: targetNodes.length } : undefined}
+          />
         ))}
       </div>
 
-      {/* Global Network Map */}
-      <GlobalNetworkMap />
-
-      {/* Two-column tables */}
-      <div className="grid gap-4 xl:grid-cols-2">
-        <TargetNodesTable nodes={loaded ? targetNodes : undefined} />
-        <DraftNodesTable nodes={loaded ? draftNodes : undefined} />
+      {/* Map with Target/Draft panels on the right */}
+      <div className="flex gap-4">
+        <div className="min-w-0 flex-1">
+          <GlobalNetworkMap />
+        </div>
+        <div className="flex w-[26rem] shrink-0 flex-col gap-4 xl:w-[30rem] 2xl:w-[34rem]">
+          <TargetNodesTable nodes={loaded ? targetNodes : undefined} />
+          <DraftNodesTable nodes={loaded ? draftNodes : undefined} />
+        </div>
       </div>
     </div>
   )
