@@ -27,6 +27,59 @@ image = (
 )
 
 
+# Map Modal region codes to (lat, lng, city, country) for map display
+def _region_to_location(region: str) -> dict:
+    r = (region or "").lower()
+    # US
+    if r.startswith("us-east") or r.startswith("us-ashburn") or "eastus" in r or "virginia" in r:
+        return {"lat": 38.9072, "lng": -77.0369, "city": "Washington, D.C.", "country": "USA"}
+    if r.startswith("us-west-1") or r == "us-west-1" or "westus" in r and "westus2" not in r:
+        return {"lat": 37.7749, "lng": -122.4194, "city": "San Francisco", "country": "USA"}
+    if r.startswith("us-west") or r.startswith("us-west1") or r.startswith("us-west2"):
+        return {"lat": 45.5152, "lng": -122.6784, "city": "Portland", "country": "USA"}
+    if "us-central" in r or "centralus" in r or "chicago" in r:
+        return {"lat": 41.8781, "lng": -87.6298, "city": "Chicago", "country": "USA"}
+    if "us-south" in r or "dallas" in r:
+        return {"lat": 32.7767, "lng": -96.7970, "city": "Dallas", "country": "USA"}
+    # EU
+    if r.startswith("eu-west-1") or "europe-west1" in r or "ireland" in r:
+        return {"lat": 53.3498, "lng": -6.2603, "city": "Dublin", "country": "Ireland"}
+    if "eu-central" in r or "eu-west" in r and "frankfurt" in r or "europe-west3" in r:
+        return {"lat": 50.1109, "lng": 8.6821, "city": "Frankfurt", "country": "Germany"}
+    if "eu-west-2" in r or "europe-west2" in r or "london" in r or r == "uk":
+        return {"lat": 51.5074, "lng": -0.1278, "city": "London", "country": "UK"}
+    if "eu-west-3" in r or "paris" in r:
+        return {"lat": 48.8566, "lng": 2.3522, "city": "Paris", "country": "France"}
+    if "eu-north" in r or "stockholm" in r:
+        return {"lat": 59.3293, "lng": 18.0686, "city": "Stockholm", "country": "Sweden"}
+    if "eu-south" in r or "milan" in r:
+        return {"lat": 45.4642, "lng": 9.1900, "city": "Milan", "country": "Italy"}
+    if "europe-west4" in r or "netherlands" in r:
+        return {"lat": 52.3702, "lng": 4.8952, "city": "Amsterdam", "country": "Netherlands"}
+    # APAC
+    if "ap-northeast" in r or "asia-northeast" in r or "japan" in r or r.startswith("jp"):
+        return {"lat": 35.6762, "lng": 139.6503, "city": "Tokyo", "country": "Japan"}
+    if "ap-southeast" in r or "asia-southeast" in r or "singapore" in r:
+        return {"lat": 1.3521, "lng": 103.8198, "city": "Singapore", "country": "Singapore"}
+    if "ap-south" in r or "asia-south" in r or "mumbai" in r or "india" in r:
+        return {"lat": 19.0760, "lng": 72.8777, "city": "Mumbai", "country": "India"}
+    if "sydney" in r or "melbourne" in r or "australia" in r or r.startswith("au"):
+        return {"lat": -33.8688, "lng": 151.2093, "city": "Sydney", "country": "Australia"}
+    if "seoul" in r or "korea" in r:
+        return {"lat": 37.5665, "lng": 126.9780, "city": "Seoul", "country": "South Korea"}
+    # Other
+    if "ca-" in r or "canada" in r:
+        return {"lat": 43.6532, "lng": -79.3832, "city": "Toronto", "country": "Canada"}
+    if "sa-" in r or "brazil" in r:
+        return {"lat": -23.5505, "lng": -46.6333, "city": "São Paulo", "country": "Brazil"}
+    if "me-" in r or "dubai" in r or "uae" in r:
+        return {"lat": 25.2048, "lng": 55.2708, "city": "Dubai", "country": "UAE"}
+    if "af" in r or "southafrica" in r:
+        return {"lat": -26.2041, "lng": 28.0473, "city": "Johannesburg", "country": "South Africa"}
+    # Default (Modal default / unknown)
+    return {"lat": 37.7749, "lng": -122.4194, "city": "San Francisco", "country": "USA (Modal)"}
+
+
 @app.cls(
     image=image,
     gpu="A10G",  # Better GPU with higher compute capability
@@ -63,6 +116,12 @@ class DraftService:
         )()
 
         print("Draft service ready!")
+
+    @modal.method()
+    def get_location(self) -> dict:
+        """Return this worker's location from Modal region for the map."""
+        region = os.environ.get("MODAL_REGION", "")
+        return _region_to_location(region)
 
     @modal.method()
     def execute_inference(

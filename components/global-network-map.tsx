@@ -7,7 +7,6 @@ import { Badge } from "@/components/ui/badge"
 import { Globe, Cpu, Zap, TrendingUp, Clock, Activity } from "lucide-react"
 import dynamic from "next/dynamic"
 import { useMap } from "react-leaflet"
-import L from "leaflet"
 
 // Dynamically import map components to avoid SSR issues
 const MapContainer = dynamic(
@@ -122,8 +121,11 @@ function FitBoundsToNodes({
       map.setView(positions[0], 10)
       return
     }
-    const bounds = L.latLngBounds(positions)
-    map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 })
+    // Use dynamic import for leaflet to avoid SSR issues
+    import("leaflet").then((L) => {
+      const bounds = L.latLngBounds(positions)
+      map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 })
+    })
   }, [map, positions])
   return null
 }
@@ -227,9 +229,9 @@ export function GlobalNetworkMap() {
       return [lat, lng]
     }
 
-    // Multiple nodes at same location - apply offset
+    // Multiple nodes at same location - apply offset (smaller now that map fits bounds)
     const index = nodesAtLocation.findIndex((n) => n.id === node.id)
-    const offsetDistance = 0.08 // degrees
+    const offsetDistance = 0.02 // degrees
 
     // Arrange in a circle around the original point
     const angle = (index * 2 * Math.PI) / nodesAtLocation.length
@@ -362,36 +364,21 @@ export function GlobalNetworkMap() {
                   {showDemoNodes ? "Demo Mode ON" : "Real Nodes Only"}
                 </span>
               </button>
-
-              <div className="h-4 w-px bg-border/40"></div>
-
-              <div className="flex items-center gap-1.5">
-                <div className="h-2.5 w-2.5 rounded-full bg-green-500"></div>
-                <span className="text-muted-foreground">
-                  {draftNodes} Draft Nodes
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2.5 w-2.5 rounded-full bg-blue-500"></div>
-                <span className="text-muted-foreground">
-                  {targetNodes} Target Nodes
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-foreground">{totalNodes}</span>
-                <span className="text-muted-foreground">total nodes</span>
-              </div>
               {connections.active_route && (
-                <div className="flex items-center gap-1.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-1">
-                  <Activity className="h-3 w-3 animate-pulse text-yellow-400" />
-                  <span className="text-yellow-400 font-semibold">LIVE</span>
-                </div>
+                <>
+                  <div className="h-4 w-px bg-border/40"></div>
+                  <div className="flex items-center gap-1.5 rounded-full border border-yellow-500/30 bg-yellow-500/10 px-2 py-1">
+                    <Activity className="h-3 w-3 animate-pulse text-yellow-400" />
+                    <span className="text-yellow-400 font-semibold">LIVE</span>
+                  </div>
+                </>
               )}
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-hidden rounded-lg border border-border/40">
+          <div className="flex gap-3">
+            <div className="flex-1 overflow-hidden rounded-lg border border-border/40">
             <MapContainer
               center={[20, 0]}
               zoom={2}
@@ -638,36 +625,64 @@ export function GlobalNetworkMap() {
                 </CircleMarker>
               ))}
             </MapContainer>
-          </div>
 
-          {/* Legend and Stats */}
-          <div className="mt-3 flex items-center justify-between">
-            <div className="flex items-center gap-6 text-xs text-muted-foreground">
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                <span>Draft Nodes</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                <span>Target Nodes</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
-                <span>Inference / Data</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-2 w-2 rounded-full bg-cyan-400"></div>
-                <span>Verification</span>
+              {/* Legend */}
+              <div className="mt-3 flex items-center gap-6 text-xs text-muted-foreground border-t border-border/40 pt-3">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                  <span>Draft Nodes</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                  <span>Target Nodes</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-yellow-500"></div>
+                  <span>Inference / Data</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-cyan-400"></div>
+                  <span>Verification</span>
+                </div>
+                <div className="ml-auto text-xs text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    {connections.total_inferences}
+                  </span>{" "}
+                  real inferences • <span className="font-semibold text-yellow-500">
+                    {animatedTransmissions.length}
+                  </span>{" "}
+                  active transmissions
+                </div>
               </div>
             </div>
-            <div className="text-xs text-muted-foreground">
-              <span className="font-semibold text-foreground">
-                {connections.total_inferences}
-              </span>{" "}
-              real inferences • <span className="font-semibold text-yellow-500">
-                {animatedTransmissions.length}
-              </span>{" "}
-              active transmissions
+
+            {/* Right sidebar with node counts */}
+            <div className="w-48 shrink-0 space-y-3">
+              <div className="rounded-lg border border-border/40 bg-card/50 p-4">
+                <h3 className="text-xs font-medium text-muted-foreground mb-3">Network Stats</h3>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-3 w-3 rounded-full bg-green-500"></div>
+                      <span className="text-xs text-muted-foreground">Draft</span>
+                    </div>
+                    <span className="text-lg font-bold text-foreground">{draftNodes}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-3 w-3 rounded-full bg-blue-500"></div>
+                      <span className="text-xs text-muted-foreground">Target</span>
+                    </div>
+                    <span className="text-lg font-bold text-foreground">{targetNodes}</span>
+                  </div>
+                  <div className="border-t border-border/40 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-muted-foreground">Total</span>
+                      <span className="text-2xl font-bold text-primary">{totalNodes}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </CardContent>
