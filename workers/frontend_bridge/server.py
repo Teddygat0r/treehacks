@@ -48,7 +48,7 @@ def _router_base_url() -> str:
         return ROUTER_ADDRESS.rstrip("/")
     return f"http://{ROUTER_ADDRESS.rstrip('/')}"
 
-app = FastAPI(title="SpecNet Frontend Bridge")
+app = FastAPI(title="Nexus Frontend Bridge")
 
 app.add_middleware(
     CORSMiddleware,
@@ -604,7 +604,7 @@ async def warmup():
 # ── Startup ──
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="SpecNet Frontend Bridge")
+    parser = argparse.ArgumentParser(description="Nexus Frontend Bridge")
     parser.add_argument("--mock", action="store_true", help="Run in mock mode (no GPU/vLLM required)")
     parser.add_argument("--port", type=int, default=BRIDGE_PORT, help="Port to listen on")
     args = parser.parse_args()
@@ -613,7 +613,7 @@ if __name__ == "__main__":
         MOCK_MODE = True
 
     print(f"\n{'='*60}")
-    print(f"  SpecNet Frontend Bridge")
+    print(f"  Nexus Frontend Bridge")
     print(f"  Port: {args.port}")
     print(f"  Mode: {'MOCK (no GPU)' if MOCK_MODE else 'LIVE (router + draft nodes)'}")
     if not MOCK_MODE:

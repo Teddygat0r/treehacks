@@ -6,11 +6,11 @@ import { Badge } from "@/components/ui/badge"
 import { Wallet } from "lucide-react"
 
 const PAYOUTS = [
-  { date: "Feb 12, 2026", amount: 8.40, status: "Completed" as const },
+  { date: "Feb 12, 2026", amount: 8.40, status: "Pending" as const },
   { date: "Feb 10, 2026", amount: 6.75, status: "Completed" as const },
   { date: "Feb 7, 2026",  amount: 9.20, status: "Completed" as const },
   { date: "Feb 5, 2026",  amount: 7.10, status: "Completed" as const },
-  { date: "Feb 3, 2026",  amount: 5.90, status: "Pending" as const },
+  { date: "Feb 3, 2026",  amount: 5.90, status: "Completed" as const },
   { date: "Feb 1, 2026",  amount: 5.15, status: "Completed" as const },
 ]
 
