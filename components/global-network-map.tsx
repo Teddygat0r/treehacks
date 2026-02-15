@@ -324,7 +324,7 @@ export function GlobalNetworkMap() {
             transmission-lifecycle 7s ease-in-out forwards;
           transform-origin: center;
         }
-        /* Real inference route: gentle fade-in when it appears */
+        /* Real inference route: dash animation + gentle fade-in */
         @keyframes real-inference-fade-in {
           0% {
             opacity: 0;
@@ -334,7 +334,9 @@ export function GlobalNetworkMap() {
           }
         }
         .real-inference-appear {
-          animation: real-inference-fade-in 0.6s ease-out forwards;
+          animation:
+            dash 0.8s linear infinite,
+            real-inference-fade-in 0.6s ease-out forwards;
         }
       `}</style>
       <motion.div
