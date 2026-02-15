@@ -3,7 +3,7 @@ Draft Node implementation.
 
 - Runs draft model generation locally
 - Resolves target node address from router
-- Verifies draft tokens against target node over gRPC
+- Verifies draft tokens against target nodes over gRPC or Modal RPC
 - Supports multi-candidate (batched speculative) drafting
 - Exposes DraftNodeService gRPC server for frontend bridge calls
 """
@@ -18,6 +18,7 @@ import sys
 import threading
 import time
 import uuid
+from typing import Any
 
 import grpc
 import requests
@@ -68,16 +69,23 @@ class Token:
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model: str = "Qwen/Qwen3-4B-Instruct",
+        draft_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
         num_draft_tokens: int = 5,
         num_candidates: int = 1,
         candidate_temperature: float = 1.0,
         candidate_top_p: float = 0.9,
-        verification_server: str = "127.0.0.1:50051",
+        modal_app_name: str = "treehacks-verification-service",
+        modal_class_name: str = "VerificationService",
         draft_node_id: str | None = None,
         draft_node_address: str | None = None,
         register_with_router: bool = True,
     ):
+        self._initialized = False
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+        self._modal_client: Any = None
+        self._active_requests = 0
+
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
@@ -89,7 +97,10 @@ class DraftNodeClient:
         self.num_candidates = max(1, num_candidates)
         self.candidate_temperature = candidate_temperature
         self.candidate_top_p = candidate_top_p
-        self.verification_server = verification_server
+
+        # Modal configuration (simplified - no router routing needed)
+        self.modal_app_name = modal_app_name
+        self.modal_class_name = modal_class_name
         self.draft_model = draft_model
         self.register_with_router = register_with_router
 
@@ -103,14 +114,7 @@ class DraftNodeClient:
         self.per_round_acceptance_lengths: list[list[int]] = []
 
         self.draft_node_id = draft_node_id or f"draft-{uuid.uuid4().hex[:8]}"
-        self.draft_node_address = draft_node_address or ""
-        self._active_requests = 0
-        self._heartbeat_stop = threading.Event()
-        self._heartbeat_thread: threading.Thread | None = None
-
-        self._verification_channels: dict[str, grpc.Channel] = {}
-        self._verification_stubs: dict[str, speculative_decoding_pb2_grpc.VerificationServiceStub] = {}
-
+        self.draft_node_address = draft_node_address or f"{_resolve_local_ip()}:50052"
         from transformers import AutoTokenizer
 
         self.tokenizer = AutoTokenizer.from_pretrained(draft_model)
@@ -119,6 +123,7 @@ class DraftNodeClient:
             self.register_node()
             self._start_heartbeat()
 
+        self._initialized = True
         print(f"Draft node ready! (num_candidates={self.num_candidates})")
 
     def register_node(self) -> None:
@@ -163,31 +168,23 @@ class DraftNodeClient:
         )
         self._heartbeat_thread.start()
 
-    def _resolve_target_address(self, request: speculative_decoding_pb2.InferenceJobRequest) -> str:
-        if not self.register_with_router:
-            return self.verification_server
+    def _get_modal_verifier(self):
+        """Get or create Modal verifier client (simplified - no routing)"""
+        if self._modal_client is not None:
+            return self._modal_client
 
-        route = _router_post(
-            "/route/target-node",
-            {
-                "request_id": request.request_id,
-                "draft_node_id": self.draft_node_id,
-                "model_id": request.model_id,
-            },
-        )
-        if route and route.get("status") == "success" and route.get("worker_address"):
-            return str(route["worker_address"])
+        try:
+            import modal  # type: ignore
+        except Exception as exc:
+            raise RuntimeError(
+                "Modal package not available. Install with: pip install modal"
+            ) from exc
 
-        return self.verification_server
-
-    def _get_verification_stub(
-        self, address: str
-    ) -> speculative_decoding_pb2_grpc.VerificationServiceStub:
-        if address not in self._verification_stubs:
-            channel = grpc.insecure_channel(address)
-            self._verification_channels[address] = channel
-            self._verification_stubs[address] = speculative_decoding_pb2_grpc.VerificationServiceStub(channel)
-        return self._verification_stubs[address]
+        print(f"Connecting to Modal: {self.modal_app_name}/{self.modal_class_name}")
+        modal_cls = modal.Cls.from_name(self.modal_app_name, self.modal_class_name)
+        self._modal_client = modal_cls()
+        print("✓ Connected to Modal verification service")
+        return self._modal_client
 
     def _generate_candidates(
         self,
@@ -258,12 +255,14 @@ class DraftNodeClient:
 
     def _verify_candidate(
         self,
-        verification_stub: speculative_decoding_pb2_grpc.VerificationServiceStub,
         request: speculative_decoding_pb2.InferenceJobRequest,
         current_token_ids: list[int],
         candidate: dict,
     ) -> dict:
-        verify_request = speculative_decoding_pb2.VerificationRequest(
+        """Verify a single candidate using Modal (simplified - no routing)"""
+        modal_client = self._get_modal_verifier()
+
+        modal_response = modal_client.verify_draft.remote(
             request_id=request.request_id,
             session_id="session-0",
             prefix_token_ids=list(current_token_ids),
@@ -272,16 +271,16 @@ class DraftNodeClient:
             temperature=request.params.temperature if request.params.temperature > 0 else 0.8,
             top_k=request.params.top_k if request.params.top_k > 0 else -1,
         )
-        verify_response = verification_stub.VerifyDraft(verify_request)
+
         return {
-            "num_accepted_tokens": verify_response.num_accepted_tokens,
-            "acceptance_mask": list(verify_response.acceptance_mask),
-            "corrected_token_ids": list(verify_response.corrected_token_ids),
-            "corrected_logprobs": list(verify_response.corrected_logprobs),
-            "next_token_id": verify_response.next_token_id,
-            "next_token_logprob": verify_response.next_token_logprob,
-            "verification_time_ms": float(verify_response.verification_time_ms),
-            "acceptance_rate": float(verify_response.acceptance_rate),
+            "num_accepted_tokens": int(modal_response.get("num_accepted_tokens", 0)),
+            "acceptance_mask": list(modal_response.get("acceptance_mask", [])),
+            "corrected_token_ids": list(modal_response.get("corrected_token_ids", [])),
+            "corrected_logprobs": list(modal_response.get("corrected_logprobs", [])),
+            "next_token_id": int(modal_response.get("next_token_id", 0)),
+            "next_token_logprob": float(modal_response.get("next_token_logprob", 0.0)),
+            "verification_time_ms": float(modal_response.get("verification_time_ms", 0.0)),
+            "acceptance_rate": float(modal_response.get("acceptance_rate", 0.0)),
         }
 
     def execute_inference_stream(self, request):
@@ -297,9 +296,8 @@ class DraftNodeClient:
         try:
             start_time = time.time()
 
-            target_address = self._resolve_target_address(request)
-            verification_stub = self._get_verification_stub(target_address)
-            print(f"Using target node: {target_address}")
+            # Connect to Modal (simplified - no routing needed)
+            print(f"Using Modal verification: {self.modal_app_name}/{self.modal_class_name}")
 
             current_text = request.prompt
             current_token_ids = self.tokenizer.encode(current_text)
@@ -308,6 +306,7 @@ class DraftNodeClient:
             total_draft_generated = 0
             total_draft_accepted = 0
             speculation_rounds = 0
+            fatal_error: str | None = None
 
             max_tokens = request.params.max_tokens if request.params.max_tokens > 0 else 16
             draft_tokens_per_round = (
@@ -333,12 +332,17 @@ class DraftNodeClient:
                 speculation_rounds += 1
                 num_to_draft = min(draft_tokens_per_round, max_tokens - len(all_tokens))
 
-                candidates, draft_time_ms, active_n = self._generate_candidates(
-                    current_text=current_text,
-                    request=request,
-                    num_to_draft=num_to_draft,
-                    speculation_round=speculation_rounds,
-                )
+                try:
+                    candidates, draft_time_ms, active_n = self._generate_candidates(
+                        current_text=current_text,
+                        request=request,
+                        num_to_draft=num_to_draft,
+                        speculation_round=speculation_rounds,
+                    )
+                except Exception as exc:
+                    fatal_error = f"draft generation failed: {type(exc).__name__}: {exc}"
+                    print(f"Draft generation failed: {exc}")
+                    break
                 if not candidates or not candidates[0]["draft_token_ids"]:
                     break
 
@@ -355,14 +359,16 @@ class DraftNodeClient:
                     for candidate in candidates:
                         candidate_results.append(
                             self._verify_candidate(
-                                verification_stub=verification_stub,
                                 request=request,
                                 current_token_ids=current_token_ids,
                                 candidate=candidate,
                             )
                         )
-                except grpc.RpcError as exc:
-                    print(f"Verification RPC failed: {exc.code()} {exc.details()}")
+                except Exception as exc:
+                    fatal_error = f"Modal verification call failed: {exc}"
+                    print(f"Modal verification call failed: {exc}")
+                    import traceback
+                    traceback.print_exc()
                     break
 
                 best_idx = max(
@@ -522,13 +528,17 @@ class DraftNodeClient:
             tps = len(all_tokens) / (elapsed / 1000) if elapsed > 0 else 0.0
             print(f"   Total time: {elapsed:.1f}ms ({tps:.1f} tokens/sec)")
             print(f"   Result: {final_text!r}")
+            if fatal_error:
+                print(f"   Error: {fatal_error}")
             print(f"{'='*80}\n")
 
+            status = common_pb2.STATUS_FAILED if fatal_error and len(all_tokens) == 0 else common_pb2.STATUS_SUCCESS
             response = speculative_decoding_pb2.InferenceJobResponse(
                 request_id=request.request_id,
                 generated_text=final_text,
                 tokens=[common_pb2.Token(token_id=t.token_id, text=t.text, logprob=t.logprob) for t in all_tokens],
-                status=common_pb2.STATUS_SUCCESS,
+                status=status,
+                error_message=fatal_error or "",
                 total_tokens=len(all_tokens),
                 draft_tokens_generated=total_draft_generated,
                 draft_tokens_accepted=total_draft_accepted,
@@ -548,14 +558,14 @@ class DraftNodeClient:
         return result
 
     def close(self):
-        self._heartbeat_stop.set()
-        if self._heartbeat_thread and self._heartbeat_thread.is_alive():
+        if hasattr(self, "_heartbeat_stop"):
+            self._heartbeat_stop.set()
+        if hasattr(self, "_heartbeat_thread") and self._heartbeat_thread and self._heartbeat_thread.is_alive():
             self._heartbeat_thread.join(timeout=1.0)
 
-        for channel in self._verification_channels.values():
-            channel.close()
-        self._verification_channels.clear()
-        self._verification_stubs.clear()
+        # Cleanup Modal client
+        if hasattr(self, "_modal_client"):
+            self._modal_client = None
 
         if hasattr(self, "llm"):
             try:
@@ -565,7 +575,10 @@ class DraftNodeClient:
                 pass
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 class DraftNodeServiceImpl(speculative_decoding_pb2_grpc.DraftNodeServiceServicer):
@@ -617,12 +630,13 @@ class DraftNodeServiceImpl(speculative_decoding_pb2_grpc.DraftNodeServiceService
 
 def serve(
     port: int = 50052,
-    draft_model: str = "Qwen/Qwen3-4B-Instruct",
+    draft_model: str = "Qwen/Qwen2.5-1.5B-Instruct",
     num_draft_tokens: int = 5,
     num_candidates: int = 1,
     candidate_temperature: float = 1.0,
     candidate_top_p: float = 0.9,
-    verification_server: str = "127.0.0.1:50051",
+    modal_app_name: str = "treehacks-verification-service",
+    modal_class_name: str = "VerificationService",
     draft_node_id: str | None = None,
     draft_node_address: str | None = None,
     register_with_router: bool = True,
@@ -637,7 +651,8 @@ def serve(
         num_candidates=num_candidates,
         candidate_temperature=candidate_temperature,
         candidate_top_p=candidate_top_p,
-        verification_server=verification_server,
+        modal_app_name=modal_app_name,
+        modal_class_name=modal_class_name,
         draft_node_id=draft_node_id,
         draft_node_address=draft_node_address,
         register_with_router=register_with_router,
@@ -659,6 +674,7 @@ def serve(
     print(f"   Draft model: {draft_model}")
     print(f"   Num candidates: {num_candidates}")
     print(f"   Router: {ROUTER_HTTP_BASE}")
+    print(f"   Modal target: {modal_app_name}/{modal_class_name}")
     print(f"{'='*80}\n")
 
     try:
@@ -705,7 +721,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--draft-model",
         type=str,
-        default="Qwen/Qwen3-4B-Instruct",
+        default="Qwen/Qwen2.5-1.5B-Instruct",
         help="Draft model name",
     )
     parser.add_argument("--num-draft-tokens", type=int, default=5, help="Draft tokens per round")
@@ -723,10 +739,16 @@ if __name__ == "__main__":
         help="Top-p used when drafting multiple candidates",
     )
     parser.add_argument(
-        "--verification-server",
+        "--modal-app-name",
         type=str,
-        default="127.0.0.1:50051",
-        help="Fallback target verification server when router lookup fails",
+        default="treehacks-verification-service",
+        help="Modal app name for target verification",
+    )
+    parser.add_argument(
+        "--modal-class-name",
+        type=str,
+        default="VerificationService",
+        help="Modal class name for target verification",
     )
     parser.add_argument("--draft-node-id", type=str, default=None, help="Optional draft node ID")
     parser.add_argument(
@@ -750,7 +772,8 @@ if __name__ == "__main__":
             num_candidates=args.num_candidates,
             candidate_temperature=args.candidate_temperature,
             candidate_top_p=args.candidate_top_p,
-            verification_server=args.verification_server,
+            modal_app_name=args.modal_app_name,
+            modal_class_name=args.modal_class_name,
             draft_node_id=args.draft_node_id,
             draft_node_address=args.draft_node_address,
             register_with_router=not args.no_register,

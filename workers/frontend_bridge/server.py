@@ -38,8 +38,17 @@ import speculative_decoding_pb2_grpc
 # Hard-coded router IP as requested.
 ROUTER_HTTP_BASE = "http://127.0.0.1:8001"
 
-DRAFT_MODEL_ID = os.getenv("DRAFT_MODEL_ID", "Qwen/Qwen3-4B-Instruct")
-TARGET_MODEL_ID = os.getenv("TARGET_MODEL_ID", "Qwen/Qwen2.5-0.5B-Instruct")
+# Keep bridge model routing aligned with worker launch env names.
+DRAFT_MODEL_ID = (
+    os.getenv("DRAFT_MODEL_ID")
+    or os.getenv("DRAFT_MODEL")
+    or "Qwen/Qwen2.5-1.5B-Instruct"
+)
+TARGET_MODEL_ID = (
+    os.getenv("TARGET_MODEL_ID")
+    or os.getenv("TARGET_MODEL")
+    or "Qwen/Qwen2.5-3B-Instruct"
+)
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8000"))
 MOCK_MODE = os.getenv("MOCK_MODE", "").lower() in ("1", "true", "yes")
 TOKEN_SEND_BATCH_SIZE = max(1, int(os.getenv("TOKEN_SEND_BATCH_SIZE", "1")))
@@ -340,9 +349,11 @@ def run_mock_inference(prompt: str, params: InferenceRequest):
 # ── Real inference (delegated to remote draft node) ──
 
 def run_real_inference(prompt: str, params: InferenceRequest):
+    print(f"Starting run_real_inference for prompt: {prompt[:50]}...")
     request_id = str(uuid.uuid4())[:8]
     model_prompt = _build_model_prompt(prompt)
 
+    print(f"Routing request {request_id} to draft node...")
     route = _route_to_draft_node(request_id=request_id, prompt=model_prompt)
     draft_address = route["assigned_draft_node_address"]
     draft_id = route.get("assigned_draft_node_id", "unknown")
@@ -363,7 +374,9 @@ def run_real_inference(prompt: str, params: InferenceRequest):
     )
 
     stub = _get_draft_stub(draft_address)
+    print(f"Calling StreamInference on draft node at {draft_address}")
     stream = stub.StreamInference(request)
+    print("StreamInference call initiated, starting to iterate...")
 
     round_num = 0
     round_buffer: list[TokenEvent] = []
@@ -371,6 +384,7 @@ def run_real_inference(prompt: str, params: InferenceRequest):
 
     try:
         for chunk in stream:
+            print(f"Received chunk from draft node: is_final={chunk.is_final}")
             if chunk.is_final:
                 final_response = chunk.final_response
                 break
@@ -396,7 +410,13 @@ def run_real_inference(prompt: str, params: InferenceRequest):
                 yield ("round", round_event, list(round_buffer))
                 round_buffer.clear()
     except grpc.RpcError as exc:
+        print(f"gRPC error: code={exc.code()}, details={exc.details()}")
         raise RuntimeError(f"Draft node RPC failed: {exc.code()} {exc.details()}") from exc
+    except Exception as exc:
+        print(f"Unexpected error during stream iteration: {type(exc).__name__}: {exc}")
+        import traceback
+        traceback.print_exc()
+        raise
 
     if round_buffer:
         round_num += 1
@@ -411,8 +431,10 @@ def run_real_inference(prompt: str, params: InferenceRequest):
         yield ("round", round_event, list(round_buffer))
 
     if final_response is None:
+        print("ERROR: Draft node stream ended without final response")
         raise RuntimeError("Draft node stream ended without final response")
 
+    print("Draft node stream completed successfully, building summary...")
     summary_tokens = [
         TokenEvent(
             text=token.text,
@@ -495,12 +517,15 @@ async def ws_stream_inference(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "done", "data": data.model_dump()}))
 
     except WebSocketDisconnect:
-        pass
+        print("WebSocket disconnected by client")
     except Exception as e:
+        print(f"Error in WebSocket handler: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         try:
             await websocket.send_text(json.dumps({"type": "error", "data": {"message": str(e)}}))
-        except Exception:
-            pass
+        except Exception as send_error:
+            print(f"Failed to send error to WebSocket: {send_error}")
 
 
 def _format_memory(memory_bytes: int) -> str:

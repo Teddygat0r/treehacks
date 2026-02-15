@@ -56,7 +56,6 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
         gpu_memory_utilization=0.98,
         max_model_len=1024,
         max_num_seqs=2,
-        enforce_eager=True,
     ):
         print(f"Initializing verification service with model: {model_name}")
         print(f"Using verification strategy: {strategy}")
@@ -77,7 +76,6 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=max_model_len,
             max_num_seqs=max_num_seqs,
-            enforce_eager=enforce_eager,
         )
 
         # Load tokenizer for decoding
@@ -229,7 +227,6 @@ def serve(
     gpu_memory_utilization=0.98,
     max_model_len=1024,
     max_num_seqs=2,
-    enforce_eager=True,
     worker_id=None,
     worker_address=None,
     register_with_router=True,
@@ -243,7 +240,6 @@ def serve(
         gpu_memory_utilization=gpu_memory_utilization,
         max_model_len=max_model_len,
         max_num_seqs=max_num_seqs,
-        enforce_eager=enforce_eager,
     )
     speculative_decoding_pb2_grpc.add_VerificationServiceServicer_to_server(servicer, server)
 
@@ -259,6 +255,7 @@ def serve(
         register_payload = {
             "worker_id": worker_id,
             "address": worker_address,
+            "transport": "grpc",
             "model_id": model_name,
             "model_name": model_name,
             "version": "",
@@ -302,7 +299,6 @@ def serve(
     print(f"   gpu_memory_utilization: {gpu_memory_utilization}")
     print(f"   max_model_len: {max_model_len}")
     print(f"   max_num_seqs: {max_num_seqs}")
-    print(f"   enforce_eager: {enforce_eager}")
     print(f"   worker_id: {worker_id}")
     print(f"   worker_address: {worker_address}")
     print(f"   router: {ROUTER_HTTP_BASE if register_with_router else 'disabled'}")
@@ -342,8 +338,6 @@ if __name__ == '__main__':
                         help='Maximum context length for KV cache sizing (default: 1024)')
     parser.add_argument('--max-num-seqs', type=int, default=2,
                         help='Maximum concurrent sequences (default: 2)')
-    parser.add_argument('--no-enforce-eager', action='store_true',
-                        help='Disable enforce_eager (may use more memory)')
     parser.add_argument('--worker-id', type=str, default=None,
                         help='Optional worker ID for router registration')
     parser.add_argument('--worker-address', type=str, default=None,
@@ -366,7 +360,6 @@ if __name__ == '__main__':
         gpu_memory_utilization=args.gpu_memory_utilization,
         max_model_len=args.max_model_len,
         max_num_seqs=args.max_num_seqs,
-        enforce_eager=not args.no_enforce_eager,
         worker_id=args.worker_id,
         worker_address=args.worker_address,
         register_with_router=not args.no_register,
