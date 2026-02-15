@@ -7,7 +7,7 @@ import { usePathname } from "next/navigation"
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
   { href: "/network", label: "Network" },
-  { href: "/gpu", label: "GPU Hub" },
+  { href: "/gpu", label: "GPU Marketplace" },
   { href: "/visualize", label: "Visualize" },
 ]
 
