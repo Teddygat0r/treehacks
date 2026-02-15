@@ -30,13 +30,13 @@ image = (
 
 @app.cls(
     image=image,
-    gpu="H100",
+    gpu=modal.gpu.H100(count=4),
     timeout=600,
     scaledown_window=300,
 )
 @modal.concurrent(max_inputs=10)
 class VerificationService:
-    model_name: str = "Qwen/Qwen3-32B-Instruct"
+    model_name: str = "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4"
     strategy: str = "deterministic"
 
     @modal.enter()
@@ -56,6 +56,7 @@ class VerificationService:
             gpu_memory_utilization=0.90,
             max_model_len=4096,
             enable_prefix_caching=True,
+            tensor_parallel_size=4,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
@@ -78,8 +79,6 @@ class VerificationService:
         """Verify draft tokens with the powerful model."""
         import time
         from vllm import SamplingParams
-
-        start_time = time.time()
 
         num_draft_tokens = len(draft_token_ids)
 
@@ -108,6 +107,7 @@ class VerificationService:
 
         print(f"  Verifying {num_draft_tokens} draft tokens (temp={sampling_params.temperature}, top_k={sampling_params.top_k})")
 
+        start_time = time.time()
         outputs = self.llm.generate(
             prompts=[{"prompt_token_ids": prefix_token_ids}],
             sampling_params=sampling_params,
@@ -170,7 +170,6 @@ class VerificationService:
         import time
         from vllm import SamplingParams
 
-        start_time = time.time()
         n = len(candidates)
 
         if n == 0:
@@ -211,6 +210,7 @@ class VerificationService:
 
         print(f"  Multi-candidate verify: {n} candidates, max_draft_len={max_draft_len}")
 
+        start_time = time.time()
         outputs = self.llm.generate(
             prompts=[{"prompt_token_ids": prefix_token_ids}],
             sampling_params=sampling_params,

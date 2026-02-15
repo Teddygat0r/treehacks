@@ -52,8 +52,8 @@ class _VerifyResult:
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="Qwen/Qwen2.5-0.5B-Instruct",
-        num_draft_tokens=5,
+        draft_model="Qwen/Qwen2.5-3B-Instruct",
+        num_draft_tokens=20,
         num_candidates=1,
         candidate_temperature=0.0,
         candidate_top_p=0.9,
@@ -160,7 +160,8 @@ class DraftNodeClient:
 
         # Per-round timing arrays
         timing_draft_ms = []
-        timing_verify_ms = []
+        timing_verify_ms = []       # server-side GPU time
+        timing_verify_wall_ms = []  # client wall-clock time (includes network)
         timing_process_ms = []
         timing_optimistic_ms = []
 
@@ -195,7 +196,10 @@ class DraftNodeClient:
             eos_reached = False
             if pending_verify is not None:
                 verify_result_raw = pending_verify.get()
-                timing_verify_ms.append(verify_result_raw.get("verification_time_ms", 0.0))
+                verify_wall_time = (time.time() - pending_spawn_time) * 1000
+                server_verify_time = verify_result_raw.get("verification_time_ms", 0.0)
+                timing_verify_ms.append(server_verify_time)
+                timing_verify_wall_ms.append(verify_wall_time)
 
                 process_start = time.time()
 
@@ -321,16 +325,18 @@ class DraftNodeClient:
                             eos_reached = True
                             break
 
-                # Check next_token_id from target (when all draft tokens accepted)
-                if not eos_reached and eos_token_ids and verify_result["next_token_id"] in eos_token_ids:
+                # Bonus token from target (K+1th token when all K draft accepted)
+                if not eos_reached and verify_result["next_token_id"] != 0:
+                    next_tid = verify_result["next_token_id"]
                     token = Token(
-                        token_id=verify_result["next_token_id"],
-                        text=self.tokenizer.decode([verify_result["next_token_id"]]),
+                        token_id=next_tid,
+                        text=self.tokenizer.decode([next_tid]),
                         logprob=verify_result["next_token_logprob"] or 0.0,
                     )
                     all_tokens.append(token)
-                    current_token_ids.append(verify_result["next_token_id"])
-                    eos_reached = True
+                    current_token_ids.append(next_tid)
+                    if eos_token_ids and next_tid in eos_token_ids:
+                        eos_reached = True
 
                 # Check for repetition loop
                 if not eos_reached and len(all_tokens) >= REPEAT_WINDOW:
@@ -598,10 +604,12 @@ class DraftNodeClient:
                         total_draft_accepted += num_accepted
                         best_draft = draft_token_ids
 
+                    verify_wall_time = (time.time() - verify_start) * 1000
                     if active_n > 1:
                         timing_verify_ms.append(verify_response.get("verification_time_ms", 0.0))
                     else:
                         timing_verify_ms.append(verify_result.get("verification_time_ms", 0.0))
+                    timing_verify_wall_ms.append(verify_wall_time)
 
                     process_start = time.time()
 
@@ -650,15 +658,18 @@ class DraftNodeClient:
                                 eos_reached = True
                                 break
 
-                    if not eos_reached and eos_token_ids and verify_result["next_token_id"] in eos_token_ids:
+                    # Bonus token from target (K+1th token when all K draft accepted)
+                    if not eos_reached and verify_result["next_token_id"] != 0:
+                        next_tid = verify_result["next_token_id"]
                         token = Token(
-                            token_id=verify_result["next_token_id"],
-                            text=self.tokenizer.decode([verify_result["next_token_id"]]),
+                            token_id=next_tid,
+                            text=self.tokenizer.decode([next_tid]),
                             logprob=verify_result["next_token_logprob"] or 0.0,
                         )
                         all_tokens.append(token)
-                        current_token_ids.append(verify_result["next_token_id"])
-                        eos_reached = True
+                        current_token_ids.append(next_tid)
+                        if eos_token_ids and next_tid in eos_token_ids:
+                            eos_reached = True
 
                     # Check for repetition loop
                     if not eos_reached and len(all_tokens) >= REPEAT_WINDOW:
@@ -724,16 +735,19 @@ class DraftNodeClient:
 
         # Timing breakdown
         total_draft_time = sum(timing_draft_ms)
-        total_verify_time = sum(timing_verify_ms)
+        total_verify_gpu_time = sum(timing_verify_ms)
+        total_verify_wall_time = sum(timing_verify_wall_ms)
+        total_network_overhead = total_verify_wall_time - total_verify_gpu_time
         total_process_time = sum(timing_process_ms)
         total_optimistic_time = sum(timing_optimistic_ms)
         num_rounds = len(timing_draft_ms)
-        total_tracked = total_draft_time + total_verify_time + total_process_time + total_optimistic_time
-        idle_pct = (total_verify_time / total_tracked * 100) if total_tracked > 0 else 0.0
+        total_tracked = total_draft_time + total_verify_wall_time + total_process_time + total_optimistic_time
+        idle_pct = (total_verify_wall_time / total_tracked * 100) if total_tracked > 0 else 0.0
 
         print(f"\nTiming breakdown:")
         print(f"   Total draft generation: {total_draft_time:.1f}ms (avg {total_draft_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total draft generation: 0.0ms")
-        print(f"   Total verification (GPU): {total_verify_time:.1f}ms (avg {total_verify_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total verification (GPU): 0.0ms")
+        print(f"   Total verification (GPU): {total_verify_gpu_time:.1f}ms (avg {total_verify_gpu_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total verification (GPU): 0.0ms")
+        print(f"   Total network overhead: {total_network_overhead:.1f}ms (avg {total_network_overhead/num_rounds:.1f}ms/round)" if num_rounds else "   Total network overhead: 0.0ms")
         print(f"   Total processing: {total_process_time:.1f}ms (avg {total_process_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total processing: 0.0ms")
         print(f"   Total optimistic gen: {total_optimistic_time:.1f}ms (avg {total_optimistic_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total optimistic gen: 0.0ms")
         print(f"   Draft GPU idle: {idle_pct:.1f}% of wall time")
@@ -743,6 +757,7 @@ class DraftNodeClient:
         self._last_timing = {
             'timing_draft_ms': timing_draft_ms,
             'timing_verify_ms': timing_verify_ms,
+            'timing_verify_wall_ms': timing_verify_wall_ms,
             'timing_process_ms': timing_process_ms,
             'timing_optimistic_ms': timing_optimistic_ms,
         }
@@ -803,9 +818,9 @@ def main():
                 max_tokens=16,
                 temperature=0.8,
                 top_k=50,
-                draft_tokens=5,
+                draft_tokens=20,
             ),
-            model_id="Qwen/Qwen2.5-0.5B-Instruct",
+            model_id="Qwen/Qwen2.5-3B-Instruct",
             timestamp=int(time.time() * 1000),
         )
 

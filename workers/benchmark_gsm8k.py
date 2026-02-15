@@ -221,7 +221,7 @@ def run_baseline(
 
 
 def run_benchmark(
-    draft_model="Qwen/Qwen2.5-1.5B-Instruct",
+    draft_model="Qwen/Qwen2.5-3B-Instruct",
     target_model="Qwen/Qwen2.5-3B-Instruct",
     num_samples=10,
     max_tokens=512,
@@ -281,7 +281,7 @@ def run_benchmark(
     print("Initializing draft node client...")
     client = DraftNodeClient(
         draft_model=draft_model,
-        num_draft_tokens=5,
+        num_draft_tokens=20,
         num_candidates=num_candidates,
         candidate_temperature=candidate_temperature,
         candidate_top_p=candidate_top_p,
@@ -321,7 +321,7 @@ def run_benchmark(
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_k=-1 if temperature == 0 else 50,
-                draft_tokens=5,
+                draft_tokens=20,
             ),
             model_id=target_model,
             timestamp=int(time.time() * 1000),
@@ -362,7 +362,7 @@ def run_benchmark(
             'tokens_per_sec': response.total_tokens / (response.generation_time_ms / 1000) if response.generation_time_ms > 0 else 0,
             'timing_draft_ms': timing_data.get('timing_draft_ms', []),
             'timing_verify_ms': timing_data.get('timing_verify_ms', []),
-            'timing_verify_server_ms': timing_data.get('timing_verify_server_ms', []),
+            'timing_verify_wall_ms': timing_data.get('timing_verify_wall_ms', []),
             'timing_process_ms': timing_data.get('timing_process_ms', []),
             'timing_optimistic_ms': timing_data.get('timing_optimistic_ms', []),
             'optimistic_hits': client._optimistic_hits,
@@ -457,16 +457,16 @@ def run_benchmark(
         print(f"{'Total tokens':<30} {total_tokens:<20} {baseline_total_tokens:<20}")
 
         # Verifier time: server-side GPU time only (no network overhead)
-        total_verify_server_ms = sum(sum(r.get('timing_verify_server_ms', [])) for r in results)
-        total_verify_wall_ms = sum(sum(r.get('timing_verify_ms', [])) for r in results)
-        total_verify_server_s = total_verify_server_ms / 1000
+        total_verify_gpu_ms = sum(sum(r.get('timing_verify_ms', [])) for r in results)
+        total_verify_wall_ms = sum(sum(r.get('timing_verify_wall_ms', [])) for r in results)
+        total_verify_gpu_s = total_verify_gpu_ms / 1000
         total_verify_wall_s = total_verify_wall_ms / 1000
+        total_network_overhead_s = total_verify_wall_s - total_verify_gpu_s
         baseline_gen_time_s = sum(r.get('generation_time_ms', 0) / 1000 for r in baseline_results)
-        verifier_savings = (1 - total_verify_server_s / baseline_gen_time_s) * 100 if baseline_gen_time_s > 0 else 0
-        network_overhead_s = total_verify_wall_s - total_verify_server_s
+        verifier_savings = (1 - total_verify_gpu_s / baseline_gen_time_s) * 100 if baseline_gen_time_s > 0 else 0
 
-        print(f"\n{'Target GPU time (verify)':<30} {total_verify_server_s:>6.1f}s              {baseline_gen_time_s:>6.1f}s              {verifier_savings:>5.1f}% saved")
-        print(f"{'Network overhead':<30} {network_overhead_s:>6.1f}s")
+        print(f"\n{'Target GPU time (verify)':<30} {total_verify_gpu_s:>6.1f}s              {baseline_gen_time_s:>6.1f}s              {verifier_savings:>5.1f}% saved")
+        print(f"{'Network overhead':<30} {total_network_overhead_s:>6.1f}s")
 
         print(f"\nOverall speedup: {overall_speedup:.2f}x faster with speculative decoding")
         print("="*100 + "\n")
@@ -477,9 +477,9 @@ def run_benchmark(
             'baseline_avg_tps': baseline_avg_tps,
             'baseline_total_tokens': baseline_total_tokens,
             'overall_speedup': overall_speedup,
-            'spec_verify_gpu_time_s': total_verify_server_s,
+            'spec_verify_gpu_time_s': total_verify_gpu_s,
             'spec_verify_wall_time_s': total_verify_wall_s,
-            'spec_network_overhead_s': network_overhead_s,
+            'spec_network_overhead_s': total_network_overhead_s,
             'baseline_target_gen_time_s': baseline_gen_time_s,
             'target_model_time_saved_pct': verifier_savings,
         }
@@ -536,9 +536,9 @@ def main():
     parser = argparse.ArgumentParser(description='GSM8K / HumanEval Benchmark for Speculative Decoding')
     parser.add_argument('--humaneval', action='store_true',
                         help='Use HumanEval code completion dataset instead of GSM8K')
-    parser.add_argument('--draft-model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
-                        help='Draft model to use (default: Qwen/Qwen3-1.7B-Instruct)')
-    parser.add_argument('--target-model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
+    parser.add_argument('--draft-model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
+                        help='Draft model to use (default: Qwen/Qwen2.5-3B-Instruct)')
+    parser.add_argument('--target-model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
                         help='Target model (on server) (default: Qwen/Qwen3-1.7B-Instruct)')
     parser.add_argument('--num-samples', type=int, default=10,
                         help='Number of questions to test (default: 10)')
